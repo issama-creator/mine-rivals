@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../game/asset_library.dart';
 import '../game/mine_rivals_game.dart';
 import '../game/player_skins.dart';
 import '../systems/game_settings.dart';
@@ -32,6 +35,13 @@ class _MenuScreenState extends State<MenuScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..forward();
+    // Paint menu first; warm assets after a short delay so UI never freezes.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 400), () {
+        if (!mounted) return;
+        unawaited(AssetLibrary.warmUp());
+      });
+    });
   }
 
   @override
@@ -230,6 +240,16 @@ class _MenuScreenState extends State<MenuScreen>
                       ).animate(slide),
                       child: Column(
                         children: [
+                          _RunModePicker(
+                            selected: GameSettings.instance.runMode,
+                            onChanged: (mode) {
+                              HapticFeedback.selectionClick();
+                              setState(() {
+                                GameSettings.instance.runMode = mode;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 14),
                           _MenuButton(
                             label: 'НАЧАТЬ ИГРУ',
                             icon: Icons.play_arrow_rounded,
@@ -279,6 +299,115 @@ class _MenuScreenState extends State<MenuScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RunModePicker extends StatelessWidget {
+  const _RunModePicker({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final RunMode selected;
+  final ValueChanged<RunMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          'ДИСТАНЦИЯ',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.45),
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.6,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (final mode in RunMode.values) ...[
+              if (mode != RunMode.values.first) const SizedBox(width: 10),
+              Expanded(
+                child: _ModeChip(
+                  mode: mode,
+                  selected: selected == mode,
+                  onTap: () => onChanged(mode),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({
+    required this.mode,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final RunMode mode;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: selected
+                ? const Color(0xFFFFB300).withValues(alpha: 0.22)
+                : Colors.black.withValues(alpha: 0.32),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFFFFCA28)
+                  : Colors.white.withValues(alpha: 0.12),
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              Text(
+                mode.titleRu,
+                style: TextStyle(
+                  color: selected
+                      ? const Color(0xFFFFE082)
+                      : Colors.white.withValues(alpha: 0.78),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                mode.subtitleRu,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: selected
+                      ? const Color(0xFFFFE082).withValues(alpha: 0.75)
+                      : Colors.white.withValues(alpha: 0.42),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  height: 1.15,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -563,6 +692,9 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
     HapticFeedback.selectionClick();
     setState(() => _selected = skin.id);
     GameSettings.instance.selectedSkinId = skin.id;
+    // Prefetch run sheet in background so Play doesn't hitch.
+    // ignore: discarded_futures
+    AssetLibrary.ensureLoaded().then((_) => AssetLibrary.ensureSkinLoaded(skin.id));
   }
 
   @override

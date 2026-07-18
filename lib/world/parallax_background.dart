@@ -1,11 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
 import '../game/asset_library.dart';
 import '../game/game_config.dart';
 
-/// Repeats the active corridor vertically — soft-blends seams so the join
-/// is not a hard cut (bgc art is not perfectly tileable).
+/// Repeats the active corridor vertically (pixel-snapped, no seam overlap).
 class ParallaxBackground extends PositionComponent {
   ParallaxBackground({required Vector2 size})
       : super(size: size, priority: -100);
@@ -16,17 +17,20 @@ class ParallaxBackground extends PositionComponent {
   Sprite? _tunnel;
   Sprite? _prevTunnel;
 
-  /// 0 = still old corridor, 1 = fully in the new one.
   double _enterT = 1;
-
-  /// Soft “run into the next shaft”.
-  static const double _enterSec = 1.55;
-
-  /// Soft seam only — larger values double lanterns/gems on the walls.
-  static const double _seamBlend = 0.08;
+  static const double _enterSec = 1.35;
 
   Paint? _hudFadePaint;
   Size? _hudFadeSize;
+  // Nearest-neighbor — bilinear smear at tile joins looks like a "transparent" band.
+  final Paint _tilePaint = Paint()
+    ..filterQuality = FilterQuality.none
+    ..isAntiAlias = false
+    ..color = const Color(0xFFFFFFFF);
+  final Paint _fadePaint = Paint()
+    ..filterQuality = FilterQuality.none
+    ..isAntiAlias = false;
+  final Paint _clearPaint = Paint()..color = const Color(0xFF0E0A06);
 
   bool get isEnteringCorridor => _enterT < 1;
 
@@ -47,7 +51,6 @@ class ParallaxBackground extends PositionComponent {
     _hudFadeSize = null;
   }
 
-  /// Begin a soft enter into biome [index] (0..corridorCount-1).
   void setCorridorIndex(int index) {
     final next = index.clamp(0, GameConfig.corridorCount - 1);
     if (next == corridorIndex && _tunnel != null) return;
@@ -70,16 +73,23 @@ class ParallaxBackground extends PositionComponent {
   @override
   void render(Canvas canvas) {
     final rect = size.toRect();
-    canvas.drawRect(rect, Paint()..color = const Color(0xFF0E0A06));
+    canvas.drawRect(rect, _clearPaint);
 
     final prev = _prevTunnel;
     final next = _tunnel;
     final entering = prev != null && next != null && _enterT < 1;
 
     if (entering) {
-      final eased = Curves.easeInOutCubic.transform(_enterT);
-      _drawTiled(canvas, prev, opacity: (1.0 - eased).clamp(0.0, 1.0));
-      _drawTiled(canvas, next, opacity: eased.clamp(0.0, 1.0));
+      final t = Curves.easeInOutCubic.transform(_enterT);
+      _drawTiled(canvas, prev, opacity: 1.0 - t);
+      _drawTiled(canvas, next, opacity: t);
+      final dim = math.sin(math.pi * t) * 0.12;
+      if (dim > 0.01) {
+        canvas.drawRect(
+          rect,
+          Paint()..color = Colors.black.withValues(alpha: dim),
+        );
+      }
     } else if (next != null) {
       _drawTiled(canvas, next, opacity: 1);
     }
@@ -108,72 +118,38 @@ class ParallaxBackground extends PositionComponent {
 
   void _drawTiled(Canvas canvas, Sprite sprite, {required double opacity}) {
     if (opacity <= 0.01) return;
+    if (size.x < 8 || size.y < 8) return;
 
-    final drawW = size.x;
-    final drawH = sprite.srcSize.y * (drawW / sprite.srcSize.x);
-    final blend = drawH * _seamBlend;
-    // Step shorter than tile height so neighbors overlap for the crossfade.
-    final period = drawH - blend;
-    final offset = scroll % period;
+    final srcW = sprite.srcSize.x;
+    final srcH = sprite.srcSize.y;
+    if (srcW <= 0 || srcH <= 0) return;
+
+    // Integer tile size so joins land on pixel boundaries.
+    final tileW = size.x.roundToDouble();
+    final tileH = math.max(8, (srcH * (tileW / srcW)).round()).toDouble();
+    final period = tileH;
+    // Pixel-snap scroll so the join doesn't smear between rows.
+    final offset = (scroll % period).floorToDouble();
 
     final fading = opacity < 0.999;
+    final paint = fading ? _fadePaint : _tilePaint;
     if (fading) {
-      canvas.saveLayer(
-        size.toRect(),
-        Paint()..color = Color.fromRGBO(255, 255, 255, opacity),
+      paint.color = Color.fromRGBO(255, 255, 255, opacity);
+    }
+
+    var drawn = 0;
+    for (var y = -tileH + offset; y < size.y + tileH && drawn < 8; y += period) {
+      drawn++;
+      sprite.render(
+        canvas,
+        position: Vector2(0, y),
+        size: Vector2(tileW, tileH),
+        overridePaint: paint,
       );
     }
-
-    for (var y = -drawH + offset; y < size.y + drawH; y += period) {
-      _drawSeamlessTile(canvas, sprite, y, drawW, drawH, blend);
-    }
-
-    if (fading) {
-      canvas.restore();
-    }
-  }
-
-  /// Full tile with transparent→opaque ramp on the top edge so it melts
-  /// into the previous tile instead of showing a hard glue line.
-  void _drawSeamlessTile(
-    Canvas canvas,
-    Sprite sprite,
-    double y,
-    double drawW,
-    double drawH,
-    double blend,
-  ) {
-    // Snap to device pixels — kills 1px black hairlines from subpixel gaps.
-    final yy = y.roundToDouble();
-    final ww = drawW.ceilToDouble();
-    final hh = drawH.ceilToDouble() + 1; // +1px overlap safety
-    final layer = Rect.fromLTWH(0, yy, ww, hh);
-    canvas.saveLayer(layer, Paint());
-    sprite.render(
-      canvas,
-      position: Vector2(0, yy),
-      size: Vector2(ww, drawH),
-    );
-    canvas.drawRect(
-      layer,
-      Paint()
-        ..blendMode = BlendMode.dstIn
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: const [
-            Color(0x00FFFFFF),
-            Color(0xFFFFFFFF),
-            Color(0xFFFFFFFF),
-          ],
-          stops: [0.0, (blend / drawH).clamp(0.04, 0.35), 1.0],
-        ).createShader(layer),
-    );
-    canvas.restore();
   }
 
   void setWorldSpeed(double metersPerSec) {
-    // Scroll tracks pace hard — ~3× visual speed from start → end.
     speed = 90 + metersPerSec * 12.5;
   }
 

@@ -1,9 +1,17 @@
+import '../systems/game_settings.dart';
+
 /// Tunable balance + world constants for Mine Rivals.
 class GameConfig {
-  /// 10 corridors × 700 m = 7000 m run; theme swaps every shaft.
+  /// Length of one shaft; theme swaps every segment.
   static const double corridorSegmentMeters = 700;
-  static const int corridorCount = 10;
-  static const double levelLengthMeters =
+
+  /// How many corridor PNGs ship in assets (always load all).
+  static const int corridorAssetCount = 10;
+
+  /// Active run length — from [GameSettings.runMode].
+  static int get corridorCount => GameSettings.instance.runMode.corridors;
+
+  static double get levelLengthMeters =>
       corridorSegmentMeters * corridorCount;
 
   /// Subway-style pace: starts calm, keeps climbing through the run.
@@ -11,21 +19,29 @@ class GameConfig {
   static const double runSpeedStart = 11.9;
   static const double runSpeedEnd = 37.4;
 
-  /// Speed jumps up by a fixed chunk every this many meters (linear steps).
+  /// Speed jumps every this many meters.
   static const double speedStepMeters = 200;
 
-  /// HUD/corridor meters still say 700 — but they tick this fraction of pace
-  /// (0.75 = 25% slower distance, longer shafts without changing the label).
-  static const double distanceMeterRate = 0.75;
+  /// Standard mode: +15% of start speed every [speedStepMeters].
+  static const double speedStepBoost = 0.15;
 
-  /// World run speed — linear steps every [speedStepMeters] (no curve).
+  /// HUD/corridor meters still say 700 — but they tick this fraction of pace
+  /// (lower = longer shafts). 0.62 ≈ +17% duration vs previous 0.75.
+  static const double distanceMeterRate = 0.62;
+
+  /// World run speed. Standard: +15% every 200 m. Long: soft linear ramp.
   static double runSpeedAt(double progress) {
     final distance = (progress.clamp(0.0, 1.0)) * levelLengthMeters;
+    final step = (distance / speedStepMeters).floor();
+
+    if (GameSettings.instance.runMode == RunMode.standard) {
+      // 0m → start, 200m → +15%, 400m → +30%, …
+      return runSpeedStart * (1.0 + speedStepBoost * step);
+    }
+
     final maxStep = (levelLengthMeters / speedStepMeters).floor();
     if (maxStep <= 0) return runSpeedStart;
-    final step =
-        (distance / speedStepMeters).floor().clamp(0, maxStep);
-    final t = step / maxStep;
+    final t = step.clamp(0, maxStep) / maxStep;
     return runSpeedStart + (runSpeedEnd - runSpeedStart) * t;
   }
 
@@ -105,38 +121,64 @@ class GameConfig {
   /// Falling loot sizes — jewels share one square so corridor crops look even.
   static const double jewelDisplaySize = 48;
   static const double lootDisplaySize = 38;
-  static const double bombDisplaySize = 34;
+  static const double bombDisplaySize = 46;
 
   static const double magnetRadius = 16;
   static const double magnetPullSpeed = 45;
+  /// Gold snap — short “sucks into basket” assist (~80–120 ms feel).
+  static const double goldSnapRadius = 38;
+  static const double goldSnapPullSpeed = 460;
+
+  // ── Subway-style magnet power-up ─────────────────────────────────────────
+  static const double magnetDisplaySize = 44;
+  static const double magnetPowerDuration = 15;
+  /// Wide vacuum while the power-up is active (skips bomb/web).
+  static const double powerMagnetRadius = 210;
+  static const double powerMagnetPullSpeed = 560;
+  /// Chance a pattern slot becomes a magnet pickup (still gated by cooldown).
+  static const double magnetSpawnChance = 0.04;
+  static const double magnetRespawnMin = 22;
+  static const double magnetRespawnMax = 38;
   static const double catchRadius = 26;
   /// Bombs: circular center-to-center touch only — near misses never explode.
-  static const double bombCatchRadius = 11;
+  static const double bombCatchRadius = 15;
 
   // ── Web (spider net) hazard ──────────────────────────────────────────────
   static const double webDisplaySize = 42;
   /// Strict touch like bombs — glancing pass doesn't snare.
   static const double webCatchRadius = 13;
-  /// Web appears from this 1-based shaft onward.
-  static const int webFromCorridor = 6;
+  /// Web appears from this 1-based shaft onward (1 = from the start).
+  static const int webFromCorridor = 1;
   /// Chance a normal spawn beat becomes a web (once eligible).
   static const double webSpawnChance = 0.10;
   /// How long the player stays sticky/slow after touching a web.
-  static const double webSnareDuration = 1.15;
+  static const double webSnareDuration = 3.0;
   /// Player control sluggishness while snared (1 = normal, lower = slower).
-  static const double webSnareMoveFactor = 0.4;
-  /// Brief slow-mo tactile beat right after touching the web.
-  static const double webSnarePlayRate = 0.72;
-  /// Chase pressure the thief gains from a web (smaller than a bomb).
-  static const double leadLossOnWeb = 0.7;
+  static const double webSnareMoveFactor = 0.32;
+  /// World + stride slow while snared (bomb-like hitch, a bit softer).
+  static const double webSnarePlayRate = 0.55;
+  /// Chase pressure — close to a bomb, but no crystal loss.
+  static const double leadLossOnWeb = 1.0;
 
   /// Three dodge lanes — always at least one clear row to slip through.
   static const int bombLaneCount = 3;
   /// Chance a bomb beat is a 2-lane gate (one free lane) instead of a single.
-  static const double bombDualChance = 0.42;
-  /// Min/max pause before the next bomb pattern.
-  static const double bombCooldownMin = 1.5;
-  static const double bombCooldownMax = 2.9;
+  static const double bombDualChance = 0.48;
+  /// Min/max pause before the next bomb pattern (~10% more bombs vs 1.5–2.9).
+  static const double bombCooldownMin = 1.35;
+  static const double bombCooldownMax = 2.6;
+
+  /// Walkable stone path inset from each screen edge (player steering).
+  /// ~0.27 keeps the miner on the cobbles, out of wall mushrooms/ice.
+  static const double pathInsetFrac = 0.27;
+  /// Extra padding inside the path so sprites don't kiss the rock edge.
+  static const double pathPadPx = 6;
+
+  /// Normal loot/bombs: tighter center band for the 3 rows (~56% width).
+  static const double spawnInsetFrac = 0.28;
+  /// Rare “in the bushes” spawn near the wall ice (still on path edge).
+  static const double bushSpawnChance = 0.14;
+  static const double bushInsetFrac = 0.17;
 
   static const double thiefMagnetRadius = 118;
   static const double thiefMagnetPullSpeed = 240;
@@ -157,8 +199,8 @@ class GameConfig {
   static const double thiefPassExtraX = 58;
   static const double thiefMinClearanceX = 56;
 
-  static const int runFps = 7;
-  /// Softer stride — frames hold a bit longer, less snappy.
-  static const int minerRunFps = 7;
+  static const int runFps = 9;
+  /// Slightly snappier stride so airborne feet don't hang a beat.
+  static const int minerRunFps = 9;
   static const int runFrames = 18;
 }

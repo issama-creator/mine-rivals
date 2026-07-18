@@ -19,11 +19,10 @@ class ThiefComponent extends SpriteAnimationComponent {
 
   final ThiefKind kind;
 
-  double _swayT = 0;
   double _displayScale = 1;
   double _animRate = 1;
   final Random _rng = Random();
-  late GroundShadow _shadow;
+  GroundShadow? _shadow;
 
   double passSide = 1;
 
@@ -55,21 +54,24 @@ class ThiefComponent extends SpriteAnimationComponent {
   @override
   Future<void> onLoad() async {
     await AssetLibrary.ensureLoaded();
+    if (kind == ThiefKind.blue) {
+      await AssetLibrary.ensureThiefBlueLoaded();
+    }
     animation = switch (kind) {
       ThiefKind.primary => AssetLibrary.thiefRun,
       ThiefKind.blue => AssetLibrary.thiefRunBlue,
     };
     playing = true;
-    _swayT = _rng.nextDouble() * pi * 2;
     passSide = switch (kind) {
       ThiefKind.primary => _rng.nextBool() ? 1.0 : -1.0,
       ThiefKind.blue => -1.0,
     };
 
-    _shadow = GroundShadow();
-    _shadow.size = Vector2(size.x * 0.78, size.y * 0.11);
-    _shadow.position = Vector2(size.x * 0.5, size.y - 2);
-    await add(_shadow);
+    final shadow = GroundShadow();
+    shadow.size = Vector2(size.x * 0.78, size.y * 0.11);
+    shadow.position = Vector2(size.x * 0.5, size.y - 2);
+    _shadow = shadow;
+    await add(shadow);
   }
 
   void runLane({
@@ -81,26 +83,21 @@ class ThiefComponent extends SpriteAnimationComponent {
     required bool breathingDownNeck,
     bool sprinting = false,
   }) {
-    _swayT += dt * 1.5;
-    final sway = sin(_swayT) * 8;
-
+    // Straight lane — no side sway; only overtake / clearance nudges X.
     var lane = screenCenterX +
         GameConfig.thiefLaneOffsetX * passSide +
-        laneBias +
-        sway;
+        laneBias;
 
     if (overtaking && kind == ThiefKind.primary) {
       final arc =
           sin(Curves.easeInOut.transform(overtakeT.clamp(0.0, 1.0)) * pi);
       lane = screenCenterX +
           (GameConfig.thiefLaneOffsetX + GameConfig.thiefPassExtraX * arc) *
-              passSide +
-          sway * 0.25;
+              passSide;
     } else if (breathingDownNeck) {
       lane = screenCenterX +
           (GameConfig.thiefLaneOffsetX + 14) * passSide +
-          laneBias +
-          sway;
+          laneBias;
     }
 
     final minClear = GameConfig.thiefMinClearanceX;
@@ -125,7 +122,10 @@ class ThiefComponent extends SpriteAnimationComponent {
       GameConfig.thiefWidth * _displayScale,
       GameConfig.thiefHeight * _displayScale,
     );
-    _shadow.size = Vector2(size.x * 0.78, size.y * 0.11);
-    _shadow.position = Vector2(size.x * 0.5, size.y - 2);
+    // Shadow is created in onLoad — skip until mounted (blue thief join).
+    final shadow = _shadow;
+    if (shadow == null) return;
+    shadow.size = Vector2(size.x * 0.78, size.y * 0.11);
+    shadow.position = Vector2(size.x * 0.5, size.y - 2);
   }
 }

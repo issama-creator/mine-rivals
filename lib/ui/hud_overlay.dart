@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../game/game_config.dart';
 import '../game/mine_rivals_game.dart';
 import '../systems/lead_system.dart';
 
+/// Runner-style HUD — big distance up front (Subway-like), light rivalry chips.
 class HudOverlay extends StatefulWidget {
   const HudOverlay({super.key, required this.game});
 
@@ -23,38 +26,48 @@ class _HudOverlayState extends State<HudOverlay> {
 
   int _lastYou = -1;
   int _lastThief = -1;
-  int _lastMeters = -1;
-  int _lastProgressPct = -1;
+  int _lastRun = -1;
+  int _lastGold = -1;
+  int _lastShaft = -1;
+  int _lastMagnetSec = -1;
   bool _lastYouLead = true;
   String? _lastBanner;
 
   @override
   void initState() {
     super.initState();
-    // Light poll — only rebuild when HUD numbers actually change.
-    _timer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+    // Faster poll so the big meter ticks feel alive.
+    _timer = Timer.periodic(const Duration(milliseconds: 80), (_) {
       if (!mounted) return;
       final g = widget.game;
       final you = g.stats.player.rareTotal;
       final thief = g.stats.thief.rareTotal;
-      final meters = g.remainingMeters.round();
-      final pct = (g.progress * 100).round();
+      final run = g.distance.round();
+      final gold = g.stats.player.gold;
+      final shaft = (g.distance / GameConfig.corridorSegmentMeters)
+          .floor()
+          .clamp(0, GameConfig.corridorCount - 1);
       final lead = g.lead.logicalLeader == Leader.player;
       final banner = g.bannerText;
+      final magnetSec = g.magnetPowerSeconds.ceil();
       if (you == _lastYou &&
           thief == _lastThief &&
-          meters == _lastMeters &&
-          pct == _lastProgressPct &&
+          run == _lastRun &&
+          gold == _lastGold &&
+          shaft == _lastShaft &&
           lead == _lastYouLead &&
-          banner == _lastBanner) {
+          banner == _lastBanner &&
+          magnetSec == _lastMagnetSec) {
         return;
       }
       _lastYou = you;
       _lastThief = thief;
-      _lastMeters = meters;
-      _lastProgressPct = pct;
+      _lastRun = run;
+      _lastGold = gold;
+      _lastShaft = shaft;
       _lastYouLead = lead;
       _lastBanner = banner;
+      _lastMagnetSec = magnetSec;
       setState(() {});
     });
   }
@@ -160,117 +173,120 @@ class _HudOverlayState extends State<HudOverlay> {
   @override
   Widget build(BuildContext context) {
     final game = widget.game;
+    final runM = math.max(0, game.distance.round());
+    final gold = game.stats.player.gold;
     final playerRare = game.stats.player.rareTotal;
     final thiefRare = game.stats.thief.rareTotal;
     final youLead = game.lead.logicalLeader == Leader.player;
-    final metersLeft = game.remainingMeters.round();
-    final progress = game.progress;
+    final shaft = (game.distance / GameConfig.corridorSegmentMeters)
+            .floor()
+            .clamp(0, GameConfig.corridorCount - 1) +
+        1;
+    final shafts = GameConfig.corridorCount;
+    final runLabel = _formatMeters(runM);
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Top row: coins · big distance · pause
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                IgnorePointer(
+                  child: _CoinChip(value: gold),
+                ),
                 Expanded(
                   child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        gradient: const LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0xCC3E2723), Color(0xD91A100A)],
-                        ),
-                        border: Border.all(
-                          color: const Color(0xFFFFB300).withValues(alpha: 0.55),
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
-                        child: Row(
-                          children: [
-                            _CrystalScore(
-                              asset: _gemYou,
-                              value: playerRare,
-                              accent: const Color(0xFF4FC3F7),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _ShaftProgress(progress: progress),
-                                  const SizedBox(height: 2),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        '$metersLeft м',
-                                        style: TextStyle(
-                                          color: const Color(0xFFFFE082)
-                                              .withValues(alpha: 0.9),
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      Text(
-                                        '  ·  ',
-                                        style: TextStyle(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.3),
-                                          fontSize: 10,
-                                        ),
-                                      ),
-                                      Text(
-                                        youLead ? 'впереди' : 'вор впереди',
-                                        style: TextStyle(
-                                          color: youLead
-                                              ? const Color(0xFF81C784)
-                                              : const Color(0xFFFF8A65),
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                    child: Column(
+                      children: [
+                        // Hero distance — the Subway score read.
+                        Text(
+                          runLabel,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: const Color(0xFFFFF8E1),
+                            fontSize: 34,
+                            fontWeight: FontWeight.w900,
+                            height: 1,
+                            letterSpacing: -0.5,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withValues(alpha: 0.75),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            _CrystalScore(
-                              asset: _gemThief,
-                              value: thiefRare,
-                              accent: const Color(0xFFEF5350),
-                            ),
-                          ],
+                              Shadow(
+                                color: const Color(0xFFFFB300)
+                                    .withValues(alpha: 0.35),
+                                blurRadius: 12,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'м',
+                          style: TextStyle(
+                            color: const Color(0xFFFFE082)
+                                .withValues(alpha: 0.85),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 2,
+                            height: 1,
+                            shadows: const [
+                              Shadow(
+                                color: Colors.black54,
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        _ShaftDots(
+                          current: shaft,
+                          total: shafts,
+                          progressInShaft: (game.distance %
+                                  GameConfig.corridorSegmentMeters) /
+                              GameConfig.corridorSegmentMeters,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          youLead ? 'Ты впереди' : 'Вор впереди',
+                          style: TextStyle(
+                            color: youLead
+                                ? const Color(0xFF81C784)
+                                : const Color(0xFFFF8A65),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            shadows: const [
+                              Shadow(color: Colors.black54, blurRadius: 3),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 6),
                 Material(
-                  color: Colors.black.withValues(alpha: 0.45),
+                  color: Colors.black.withValues(alpha: 0.4),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                     side: BorderSide(
-                      color: const Color(0xFFFFB300).withValues(alpha: 0.5),
+                      color: const Color(0xFFFFB300).withValues(alpha: 0.45),
                     ),
                   ),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: _openPauseMenu,
                     child: const SizedBox(
-                      width: 36,
-                      height: 36,
+                      width: 40,
+                      height: 40,
                       child: Icon(
-                        Icons.menu_rounded,
-                        size: 20,
+                        Icons.pause_rounded,
+                        size: 22,
                         color: Color(0xFFFFE082),
                       ),
                     ),
@@ -278,8 +294,37 @@ class _HudOverlayState extends State<HudOverlay> {
                 ),
               ],
             ),
-            if (game.bannerText != null) ...[
-              const SizedBox(height: 6),
+            // Crystals on the edges — keep the center path clear.
+            const SizedBox(height: 4),
+            IgnorePointer(
+              child: Row(
+                children: [
+                  _CrystalScore(
+                    asset: _gemYou,
+                    value: playerRare,
+                    accent: const Color(0xFF4FC3F7),
+                    label: 'ты',
+                  ),
+                  const Spacer(),
+                  _CrystalScore(
+                    asset: _gemThief,
+                    value: thiefRare,
+                    accent: const Color(0xFFEF5350),
+                    label: 'вор',
+                  ),
+                ],
+              ),
+            ),
+            if (game.hasMagnetPower) ...[
+              const SizedBox(height: 8),
+              IgnorePointer(
+                child: _banner(
+                  'Магнит ${game.magnetPowerSeconds.ceil()}с',
+                  const Color(0xFF29B6F6),
+                ),
+              ),
+            ] else if (game.bannerText != null) ...[
+              const SizedBox(height: 8),
               IgnorePointer(
                 child: _banner(game.bannerText!, game.bannerColor),
               ),
@@ -288,6 +333,19 @@ class _HudOverlayState extends State<HudOverlay> {
         ),
       ),
     );
+  }
+
+  static String _formatMeters(int m) {
+    if (m < 1000) return '$m';
+    // 1 247 style — readable mid-run.
+    final s = m.toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      final fromEnd = s.length - i;
+      buf.write(s[i]);
+      if (fromEnd > 1 && fromEnd % 3 == 1) buf.write(' ');
+    }
+    return buf.toString();
   }
 
   Widget _banner(String text, Color color) {
@@ -308,6 +366,114 @@ class _HudOverlayState extends State<HudOverlay> {
             fontSize: 12,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CoinChip extends StatelessWidget {
+  const _CoinChip({required this.value});
+
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: Colors.black.withValues(alpha: 0.4),
+        border: Border.all(
+          color: const Color(0xFFFFC107).withValues(alpha: 0.55),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 10, 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [Color(0xFFFFF59D), Color(0xFFFFB300)],
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '$value',
+              style: const TextStyle(
+                color: Color(0xFFFFE082),
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+                height: 1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shaft pips — light progress without a heavy slider bar.
+class _ShaftDots extends StatelessWidget {
+  const _ShaftDots({
+    required this.current,
+    required this.total,
+    required this.progressInShaft,
+  });
+
+  final int current;
+  final int total;
+  final double progressInShaft;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (var i = 1; i <= total; i++) ...[
+          if (i > 1) const SizedBox(width: 5),
+          _pip(i),
+        ],
+      ],
+    );
+  }
+
+  Widget _pip(int i) {
+    final done = i < current;
+    final active = i == current;
+    final t = progressInShaft.clamp(0.0, 1.0);
+    final size = active ? 9.0 : 6.0;
+    Color color;
+    if (done) {
+      color = const Color(0xFFFFB300);
+    } else if (active) {
+      color = Color.lerp(
+        const Color(0xFF5D4037),
+        const Color(0xFFFFE082),
+        0.35 + t * 0.65,
+      )!;
+    } else {
+      color = Colors.white.withValues(alpha: 0.22);
+    }
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: const Color(0xFFFFB300).withValues(alpha: 0.45),
+                  blurRadius: 6,
+                ),
+              ]
+            : null,
       ),
     );
   }
@@ -373,109 +539,67 @@ class _CrystalScore extends StatelessWidget {
     required this.asset,
     required this.value,
     required this.accent,
+    required this.label,
   });
 
   final String asset;
   final int value;
   final Color accent;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: Colors.black.withValues(alpha: 0.35),
-        border: Border.all(color: accent.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(12),
+        color: Colors.black.withValues(alpha: 0.38),
+        border: Border.all(color: accent.withValues(alpha: 0.45)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(5, 3, 8, 3),
+        padding: const EdgeInsets.fromLTRB(8, 4, 10, 4),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Image.asset(
               asset,
-              width: 22,
-              height: 22,
+              width: 20,
+              height: 20,
               filterQuality: FilterQuality.medium,
               errorBuilder: (_, __, ___) => Icon(
                 Icons.diamond_rounded,
-                size: 18,
+                size: 16,
                 color: accent,
               ),
             ),
-            const SizedBox(width: 4),
-            Text(
-              '$value',
-              style: TextStyle(
-                color: accent,
-                fontWeight: FontWeight.w900,
-                fontSize: 15,
-                height: 1,
-              ),
+            const SizedBox(width: 5),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label.toUpperCase(),
+                  style: TextStyle(
+                    color: accent.withValues(alpha: 0.75),
+                    fontSize: 8,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  '$value',
+                  style: TextStyle(
+                    color: accent,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                    height: 1,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ShaftProgress extends StatelessWidget {
-  const _ShaftProgress({required this.progress});
-
-  final double progress;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 10,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          final fill = progress.clamp(0.0, 1.0) * w;
-          return Stack(
-            alignment: Alignment.centerLeft,
-            children: [
-              Container(
-                height: 5,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
-                  color: Colors.black.withValues(alpha: 0.5),
-                  border: Border.all(
-                    color: const Color(0xFFFFE082).withValues(alpha: 0.2),
-                  ),
-                ),
-              ),
-              Container(
-                width: fill.clamp(0, w),
-                height: 5,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFFFB300), Color(0xFFFFECB3)],
-                  ),
-                ),
-              ),
-              Positioned(
-                left: (fill - 5).clamp(0, w - 10),
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const RadialGradient(
-                      colors: [Color(0xFFFFF8E1), Color(0xFFFFB300)],
-                    ),
-                    border: Border.all(
-                      color: const Color(0xFFFFECB3),
-                      width: 1,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
       ),
     );
   }

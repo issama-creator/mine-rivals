@@ -8,6 +8,7 @@ class FloatingText extends TextComponent with HasPaint {
     required Vector2 position,
     Color color = Colors.white,
     double fontSize = 22,
+    this.pop = true,
   }) : super(
           text: text,
           position: position,
@@ -24,11 +25,26 @@ class FloatingText extends TextComponent with HasPaint {
           ),
         );
 
+  /// Subway-style scale pop on spawn.
+  final bool pop;
   double _life = 0;
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
+    if (pop) {
+      scale = Vector2.all(0.72);
+      add(
+        ScaleEffect.to(
+          Vector2.all(1.18),
+          EffectController(
+            duration: 0.11,
+            reverseDuration: 0.14,
+            curve: Curves.easeOutBack,
+          ),
+        ),
+      );
+    }
     add(
       MoveByEffect(
         Vector2(0, -56),

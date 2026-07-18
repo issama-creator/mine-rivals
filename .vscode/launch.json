@@ -1,0 +1,51 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "mineriv",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart"
+        },
+        {
+            "name": "mineriv (Android emulator)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "deviceId": "emulator-5554",
+            "toolArgs": [
+                "--no-enable-impeller"
+            ]
+        },
+        {
+            "name": "mineriv (Pixel 8 Pro)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "deviceId": "emulator-5554",
+            "toolArgs": [
+                "--no-enable-impeller"
+            ]
+        },
+        {
+            "name": "mineriv (profile mode)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--no-enable-impeller"
+            ]
+        },
+        {
+            "name": "mineriv (release mode)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "release",
+            "toolArgs": [
+                "--no-enable-impeller"
+            ]
+        }
+    ]
+}

@@ -51,7 +51,7 @@ class PlayerComponent extends SpriteAnimationComponent {
         (size.x - GameConfig.basketWidth * 1.35) / 2,
         0,
       ),
-    )..collisionType = CollisionType.passive;
+    )..collisionType = CollisionType.active;
     add(basketHitbox);
   }
 

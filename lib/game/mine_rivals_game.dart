@@ -37,8 +37,11 @@ class MineRivalsGame extends FlameGame
   final SpawnDirector spawns = SpawnDirector();
   final AudioManager audio = AudioManager();
   final Random _rng = Random();
+
   /// Active falling loot — avoids walking the whole component tree each frame.
   final List<FallingItem> liveItems = [];
+  int _dustLive = 0;
+  final List<ThiefComponent> _packCache = [];
 
   late PlayerComponent player;
   late ThiefComponent thief;
@@ -50,15 +53,28 @@ class MineRivalsGame extends FlameGame
   double spawnTimer = 0;
   double cleanTimer = 0;
   double dustTimer = 0;
-  double cameraBob = 0;
+
   /// Consecutive misses/bombs — each one adds chase pressure.
   int mistakeStreak = 0;
+
   /// Lead meters still draining after mistakes (thief approaches over time).
   double _leadDebt = 0;
+
   /// Time left stuck in a spider web (player sluggish, thief gains).
   double _webSnareTimer = 0;
 
   bool get isWebSnared => _webSnareTimer > 0;
+
+  /// Subway-style magnet power-up — pulls loot (not bomb/web).
+  double _magnetPowerTimer = 0;
+
+  bool get hasMagnetPower => _magnetPowerTimer > 0;
+
+  double get magnetPowerSeconds => _magnetPowerTimer;
+
+  /// Coin streak for catch pitch-up (+10 popup every 10).
+  int _goldStreak = 0;
+
   /// Consecutive clean catches — you pull further ahead of the thief.
   int successStreak = 0;
   Vector2 shakeOffset = Vector2.zero();
@@ -67,13 +83,22 @@ class MineRivalsGame extends FlameGame
   bool _finaleAnnounced = false;
   bool _finishBeat = false;
   double _finishBeatTimer = 0;
+
   /// Manual slow-mo (FlameGame has no built-in timeScale here).
   double _playRate = 1;
   double? dragX;
+
   /// Last bomb lane / last free lane after a dual gate.
   int _lastBombLane = -1;
+
   /// Countdown until another bomb pattern is allowed.
   double _bombCooldown = 0;
+
+  /// Corridor theme sync — apply once per index (no per-frame Future spam).
+  int _corridorDesired = -1;
+  int _corridorApplied = -1;
+  int _corridorFxAt = -1;
+  int _corridorGen = 0;
 
   /// Short HUD banner (steal / finale / etc).
   String? bannerText;
@@ -85,17 +110,19 @@ class MineRivalsGame extends FlameGame
   double get progress =>
       (distance / GameConfig.levelLengthMeters).clamp(0.0, 1.0);
 
-  double get remainingMeters =>
-      (GameConfig.levelLengthMeters - distance).clamp(0.0, GameConfig.levelLengthMeters);
+  double get remainingMeters => (GameConfig.levelLengthMeters - distance).clamp(
+    0.0,
+    GameConfig.levelLengthMeters,
+  );
 
-  bool get inFinale =>
-      remainingMeters <= GameConfig.finaleMeters && !finished;
+  bool get inFinale => remainingMeters <= GameConfig.finaleMeters && !finished;
 
   List<ThiefComponent> get _pack {
-    return [
-      thief,
-      if (thiefBlue != null) thiefBlue!,
-    ];
+    _packCache
+      ..clear()
+      ..add(thief);
+    if (thiefBlue != null) _packCache.add(thiefBlue!);
+    return _packCache;
   }
 
   @override
@@ -103,8 +130,8 @@ class MineRivalsGame extends FlameGame
 
   @override
   Future<void> onLoad() async {
-    await AssetLibrary.ensureLoaded();
-    await audio.init();
+    // Assets + audio in parallel; loading overlay keeps animating.
+    await Future.wait([AssetLibrary.ensureLoaded(), audio.init()]);
 
     background = ParallaxBackground(size: size);
     await add(background);
@@ -166,8 +193,10 @@ class MineRivalsGame extends FlameGame
     player.position = Vector2(size.x * 0.5, depth.playerY);
     player.applyDepthScale(depth.playerScale);
     for (final t in _pack) {
-      t.position =
-          Vector2(size.x * 0.5 + t.laneBias, depth.thiefY + t.depthBias);
+      t.position = Vector2(
+        size.x * 0.5 + t.laneBias,
+        depth.thiefY + t.depthBias,
+      );
       t.applyDepthScale(depth.thiefScale);
     }
     _updateDrawOrder();
@@ -181,8 +210,7 @@ class MineRivalsGame extends FlameGame
       t.priority = prio;
       prio += 2;
     }
-    final frontThiefY =
-        _pack.map((t) => t.position.y).fold<double>(0, max);
+    final frontThiefY = _pack.map((t) => t.position.y).fold<double>(0, max);
     if (player.position.y >= frontThiefY) {
       player.priority = prio + 4;
     } else {
@@ -192,10 +220,12 @@ class MineRivalsGame extends FlameGame
 
   void _updateChaseArrow() {
     // Only when you're ahead and the thief is a speck / off the bottom edge.
-    final farBehind = lead.playerLeads &&
+    final farBehind =
+        lead.playerLeads &&
         lead.leadDistance >= GameConfig.chaseArrowLeadMin &&
         !lead.isOvertaking;
-    final offish = thief.position.y > size.y * 0.92 ||
+    final offish =
+        thief.position.y > size.y * 0.92 ||
         thief.size.y < GameConfig.thiefHeight * 0.55;
     chaseArrow.setActive(farBehind && offish);
     chaseArrow.laneX = thief.position.x.clamp(48.0, size.x - 48.0);
@@ -227,16 +257,19 @@ class MineRivalsGame extends FlameGame
     if (finished) return;
 
     if (_webSnareTimer > 0) _webSnareTimer -= dt;
+    if (_magnetPowerTimer > 0) _magnetPowerTimer -= dt;
 
     var targetRate = inFinale ? 0.62 : 1.0;
-    // Fresh web touch briefly drags the whole scene for a sticky beat.
-    if (_webSnareTimer > GameConfig.webSnareDuration * 0.55) {
+    // Whole snare window: world slows so the thief visibly closes in.
+    if (_webSnareTimer > 0) {
       targetRate = min(targetRate, GameConfig.webSnarePlayRate);
     }
-    _playRate += (targetRate - _playRate) * (1 - (1 / (1 + 6 * dt)));
+    _playRate += (targetRate - _playRate) * (1 - (1 / (1 + 8 * dt)));
     final step = dt * _playRate;
     final pace = GameConfig.runSpeedAt(progress);
-    final animRate = GameConfig.runAnimRateAt(progress);
+    final animRate =
+        GameConfig.runAnimRateAt(progress) *
+        (_webSnareTimer > 0 ? GameConfig.webSnarePlayRate : 1.0);
 
     distance += pace * step * GameConfig.distanceMeterRate;
     background.setWorldSpeed(pace * _playRate);
@@ -247,7 +280,6 @@ class MineRivalsGame extends FlameGame
     _syncCorridorTheme();
     _syncExtraThieves();
     _syncFinale();
-    cameraBob += step * 3.2;
 
     _updateLeadDebt(step);
     final playingClean = cleanTimer > 2.5 && _leadDebt <= 0;
@@ -255,27 +287,20 @@ class MineRivalsGame extends FlameGame
     cleanTimer += step;
 
     final depth = lead.depthPositions(screenHeight: size.y, dt: step);
-    final bob = sin(cameraBob) * 0.35;
-    player.position.y = depth.playerY + bob * 0.25 + shakeOffset.y * 0.35;
+    // Straight run — no idle bob; only screen-shake offsets.
+    player.position.y = depth.playerY + shakeOffset.y * 0.35;
     player.applyDepthScale(depth.playerScale, step);
     for (final t in _pack) {
-      t.position.y =
-          depth.thiefY + t.depthBias + bob * 0.15 + shakeOffset.y * 0.2;
+      t.position.y = depth.thiefY + t.depthBias + shakeOffset.y * 0.2;
       t.applyDepthScale(depth.thiefScale, step);
     }
 
-    final minX = 70.0;
-    final maxX = size.x - 70.0;
+    final minX = _pathMinX;
+    final maxX = _pathMaxX;
     final desiredX = dragX ?? player.position.x;
     // Spider web makes the miner sticky/slow to steer.
-    final moveFactor =
-        _webSnareTimer > 0 ? GameConfig.webSnareMoveFactor : 1.0;
-    player.moveToward(
-      desiredX + shakeOffset.x,
-      minX,
-      maxX,
-      step * moveFactor,
-    );
+    final moveFactor = _webSnareTimer > 0 ? GameConfig.webSnareMoveFactor : 1.0;
+    player.moveToward(desiredX, minX, maxX, step * moveFactor);
     final closeBehind = lead.playerLeads && lead.leadDistance.abs() < 2.2;
     final sprinting = lead.isOvertaking && lead.sprintOvertake;
     for (final t in _pack) {
@@ -297,10 +322,14 @@ class MineRivalsGame extends FlameGame
     dustTimer += step;
     if (dustTimer > 0.45) {
       dustTimer = 0;
-      // Cap concurrent dust so particles don't pile up.
-      final dustLive = children.whereType<DustPuff>().length;
-      if (dustLive < 3) {
-        add(DustPuff(position: player.position + Vector2(0, -6)));
+      if (_dustLive < 3) {
+        _dustLive++;
+        add(
+          DustPuff(
+            position: player.position + Vector2(0, -6),
+            onDone: () => _dustLive = max(0, _dustLive - 1),
+          ),
+        );
       }
     }
 
@@ -338,41 +367,63 @@ class MineRivalsGame extends FlameGame
 
   void _shake(double intensity) {
     if (!GameSettings.instance.shakeEnabled) return;
-    add(
-      ScreenShake(
-        onOffset: (o) => shakeOffset = o,
-        intensity: intensity,
-      ),
-    );
+    add(ScreenShake(onOffset: (o) => shakeOffset = o, intensity: intensity));
   }
 
   void _magnetAndCatchUpdate(double dt) {
     final basket = player.basketWorldCenter;
-    for (final item in List<FallingItem>.of(liveItems)) {
+    final powered = hasMagnetPower;
+
+    for (var i = liveItems.length - 1; i >= 0; i--) {
+      final item = liveItems[i];
       if (item.collected || item.stolen) continue;
 
-      // Non-jewels (coin, bar, bomb, web): player only — thief phases through.
-      if (!item.type.isJewel) {
-        if (item.type.isHazard) {
-          item.setPlayerMagnet(false);
-          // Strict circular touch vs basket — no AABB near-miss fakes.
-          final dist = (basket - item.position).length;
-          final radius = item.type.isBomb
-              ? GameConfig.bombCatchRadius
-              : GameConfig.webCatchRadius;
-          if (dist <= radius) {
-            onItemCaught(item);
-          }
-        } else {
-          _playerMagnetOrCatch(item, basket, dt);
+      // Hazards never magnetize — strict touch only.
+      if (item.type.isHazard) {
+        item.setPlayerMagnet(false);
+        final dist = (basket - item.position).length;
+        final radius = item.type.isBomb
+            ? GameConfig.bombCatchRadius
+            : GameConfig.webCatchRadius;
+        if (dist <= radius) {
+          onItemCaught(item);
         }
         continue;
       }
 
-      // Jewels: player magnets only while leading.
+      // Power magnet: vacuum all loot (incl. jewels / magnet pickup).
+      if (powered && item.type.isMagnetizable) {
+        _powerMagnetPull(item, basket, dt);
+        continue;
+      }
+
+      // Non-jewels (coin, bar, magnet): player only.
+      if (!item.type.isJewel) {
+        _playerMagnetOrCatch(item, basket, dt);
+        continue;
+      }
+
+      // Jewels: player magnets only while leading (unless powered — above).
       if (!lead.playerLeads) continue;
 
       _playerMagnetOrCatch(item, basket, dt);
+    }
+  }
+
+  void _powerMagnetPull(FallingItem item, Vector2 basket, double dt) {
+    final delta = basket - item.position;
+    final dist = delta.length;
+    if (dist > GameConfig.powerMagnetRadius) {
+      item.setPlayerMagnet(false);
+      return;
+    }
+    item.setPlayerMagnet(true);
+    final pull = min(GameConfig.powerMagnetPullSpeed * dt, dist);
+    if (dist > 0.001) {
+      item.position += delta.normalized() * pull;
+    }
+    if (dist <= GameConfig.catchRadius * 0.85) {
+      onItemCaught(item);
     }
   }
 
@@ -382,11 +433,17 @@ class MineRivalsGame extends FlameGame
     final dx = delta.x.abs();
     final dy = item.position.y - basket.y;
 
-    final canAssist =
-        dx < 12 && dy > -8 && dy < 16 && dist < GameConfig.magnetRadius;
+    final gold = item.type == ItemType.gold;
+    final assistR = gold ? GameConfig.goldSnapRadius : GameConfig.magnetRadius;
+    final pullSp = gold
+        ? GameConfig.goldSnapPullSpeed
+        : GameConfig.magnetPullSpeed;
+    final laneSlack = gold ? 22.0 : 12.0;
+
+    final canAssist = dx < laneSlack && dy > -10 && dy < 22 && dist < assistR;
     if (canAssist) {
       item.setPlayerMagnet(true);
-      final pull = min(GameConfig.magnetPullSpeed * dt, dist);
+      final pull = min(pullSp * dt, dist);
       if (dist > 0.001) {
         item.position += delta.normalized() * pull;
       }
@@ -401,7 +458,8 @@ class MineRivalsGame extends FlameGame
 
   /// Thief phases through everything except jewels (magnet + steal when ahead).
   void _stealUpdate(double dt) {
-    final thiefHuntsJewels = !lead.playerLeads ||
+    final thiefHuntsJewels =
+        !lead.playerLeads ||
         (lead.isOvertaking && lead.pendingLeader == Leader.thief);
 
     if (!thiefHuntsJewels) {
@@ -411,7 +469,8 @@ class MineRivalsGame extends FlameGame
       return;
     }
 
-    for (final item in List<FallingItem>.of(liveItems)) {
+    for (var i = liveItems.length - 1; i >= 0; i--) {
+      final item = liveItems[i];
       if (item.collected || item.stolen) continue;
 
       // Same rule as coins: phase through ALL non-jewels (bars, bombs, junk).
@@ -432,11 +491,11 @@ class MineRivalsGame extends FlameGame
       }
       if (nearest == null) continue;
 
-      final stealPoint =
-          nearest.position - Vector2(0, nearest.size.y * 0.72);
+      final stealPoint = nearest.position - Vector2(0, nearest.size.y * 0.72);
       final delta = stealPoint - item.position;
       final dist = delta.length;
-      final inRange = dist < GameConfig.thiefMagnetRadius &&
+      final inRange =
+          dist < GameConfig.thiefMagnetRadius &&
           item.position.y > nearest.position.y - nearest.size.y * 1.1 &&
           item.position.y < nearest.position.y + 40;
 
@@ -461,26 +520,36 @@ class MineRivalsGame extends FlameGame
 
     spawnTimer -= dt;
     if (spawnTimer > 0) return;
-    spawnTimer = spawns.nextInterval(progress: progress);
 
-    var type = spawns.rollType(progress: progress);
-    if (type.isBomb) {
+    final beat = spawns.nextBeat(progress: progress);
+    spawnTimer = spawns.gapFor(beat, progress: progress);
+
+    // Empty corridor beat — teach “challenge incoming” before bomb gates.
+    if (beat.silence) return;
+
+    if (beat.bombPattern || beat.type.isBomb) {
       final bombLive = liveItems.any((e) => e.type.isBomb);
       if (bombLive || _bombCooldown > 0) {
-        type = _rng.nextBool() ? ItemType.gold : ItemType.coal;
+        final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
+        _spawnLiveItem(
+          type: ItemType.gold,
+          position: Vector2(_laneX(lane), -40),
+          fallSpeed: background.speed,
+        );
       } else {
-        _spawnBombPattern();
-        return;
+        _spawnBombPattern(beat);
       }
+      return;
     }
 
-    // Spider web hazard — only from shaft 6 onward, one lane like a bomb.
+    // Spider web — rare interrupt (never replaces magnet / row).
     final level = background.corridorIndex + 1;
-    if (!type.isBomb &&
+    if (!beat.type.isMagnet &&
+        !beat.row &&
         level >= GameConfig.webFromCorridor &&
         _rng.nextDouble() < GameConfig.webSpawnChance &&
         !liveItems.any((e) => e.type.isWeb)) {
-      final lane = _rng.nextInt(GameConfig.bombLaneCount);
+      final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
       _spawnLiveItem(
         type: ItemType.web,
         position: Vector2(_laneX(lane), -40),
@@ -489,9 +558,20 @@ class MineRivalsGame extends FlameGame
       return;
     }
 
-    final x = _pickLootX();
+    if (beat.row) {
+      for (var lane = 0; lane < GameConfig.bombLaneCount; lane++) {
+        _spawnLiveItem(
+          type: beat.type,
+          position: Vector2(_laneX(lane), -40),
+          fallSpeed: background.speed,
+        );
+      }
+      return;
+    }
+
+    final x = beat.lane != null ? _laneX(beat.lane!) : _pickLootX();
     _spawnLiveItem(
-      type: type,
+      type: beat.type,
       position: Vector2(x, -40),
       fallSpeed: background.speed,
     );
@@ -516,17 +596,22 @@ class MineRivalsGame extends FlameGame
     pool.release(item);
   }
 
-  /// Single bomb OR a 2-lane gate — always exactly one free row to dodge.
-  void _spawnBombPattern() {
-    final dual = _rng.nextDouble() < GameConfig.bombDualChance;
+  /// Single / dual / stagger — always at least one free row (never a full wall).
+  void _spawnBombPattern(SpawnBeat beat) {
+    final dual =
+        beat.forceDual ?? (_rng.nextDouble() < GameConfig.bombDualChance);
     final y = -40.0;
     final speed = background.speed;
 
     if (dual) {
-      // Pick the escape lane (never seal all three).
-      var freeLane = _rng.nextInt(GameConfig.bombLaneCount);
-      if (freeLane == _lastBombLane && GameConfig.bombLaneCount > 1) {
-        freeLane = (freeLane + 1 + _rng.nextInt(GameConfig.bombLaneCount - 1)) %
+      var freeLane =
+          beat.bombFreeLane ?? _rng.nextInt(GameConfig.bombLaneCount);
+      // Don't repeat the same escape twice in a row (unless pattern forced it).
+      if (beat.bombFreeLane == null &&
+          freeLane == _lastBombLane &&
+          GameConfig.bombLaneCount > 1) {
+        freeLane =
+            (freeLane + 1 + _rng.nextInt(GameConfig.bombLaneCount - 1)) %
             GameConfig.bombLaneCount;
       }
       for (var lane = 0; lane < GameConfig.bombLaneCount; lane++) {
@@ -537,45 +622,93 @@ class MineRivalsGame extends FlameGame
           fallSpeed: speed,
         );
       }
-      // Remember free lane so the next gate opens somewhere else.
       _lastBombLane = freeLane;
     } else {
-      final lanes = List<int>.generate(GameConfig.bombLaneCount, (i) => i)
-        ..removeWhere((l) => l == _lastBombLane)
-        ..shuffle(_rng);
-      final lane =
-          lanes.isEmpty ? _rng.nextInt(GameConfig.bombLaneCount) : lanes.first;
+      var lane = beat.bombLane;
+      if (lane == null) {
+        final lanes = List<int>.generate(GameConfig.bombLaneCount, (i) => i)
+          ..removeWhere((l) => l == _lastBombLane)
+          ..shuffle(_rng);
+        lane = lanes.isEmpty
+            ? _rng.nextInt(GameConfig.bombLaneCount)
+            : lanes.first;
+      }
       _lastBombLane = lane;
       _spawnLiveItem(
         type: ItemType.bomb,
         position: Vector2(_laneX(lane), y),
         fallSpeed: speed,
       );
+
+      // Dodge-punish: second bomb arrives a beat later on the escape lane.
+      final follow = beat.staggerBombLane;
+      if (follow != null && follow != lane) {
+        final delayY = -(speed * 0.34).clamp(48.0, 130.0);
+        _spawnLiveItem(
+          type: ItemType.bomb,
+          position: Vector2(_laneX(follow), y + delayY),
+          fallSpeed: speed,
+        );
+        _lastBombLane = follow;
+      }
     }
 
-    _bombCooldown = GameConfig.bombCooldownMin +
+    _bombCooldown =
+        GameConfig.bombCooldownMin +
         _rng.nextDouble() *
             (GameConfig.bombCooldownMax - GameConfig.bombCooldownMin);
-    spawnTimer = max(spawnTimer, _bombCooldown * 0.55);
+    spawnTimer = max(spawnTimer, _bombCooldown * 0.5);
   }
 
-  /// Loot prefers the three lanes (slight jitter).
+  /// Loot: mostly the 3 center rows; sometimes a “bush” near the wall.
   double _pickLootX() {
-    final lane = _rng.nextInt(GameConfig.bombLaneCount);
-    final jitter = (_rng.nextDouble() - 0.5) * 18;
-    return _laneX(lane) + jitter;
+    final bush = _rng.nextDouble() < GameConfig.bushSpawnChance;
+    final minX = _spawnMinX(bush: bush);
+    final maxX = _spawnMaxX(bush: bush);
+
+    // Bias toward the middle row.
+    final roll = _rng.nextDouble();
+    final lane = roll < 0.44 ? 1 : (roll < 0.72 ? 0 : 2);
+
+    final t = (lane + 0.5) / GameConfig.bombLaneCount;
+    final jitter = (_rng.nextDouble() - 0.5) * (bush ? 12.0 : 7.0);
+    return (minX + (maxX - minX) * t + jitter).clamp(minX, maxX);
   }
 
+  /// Bombs/webs stay on clear center lanes (never in bushes).
   double _laneX(int lane) {
-    final minX = 70.0;
-    final maxX = size.x - 70.0;
+    final minX = _spawnMinX(bush: false);
+    final maxX = _spawnMaxX(bush: false);
     final t = (lane + 0.5) / GameConfig.bombLaneCount;
     return minX + (maxX - minX) * t;
   }
 
+  double _spawnMinX({required bool bush}) {
+    final inset = bush ? GameConfig.bushInsetFrac : GameConfig.spawnInsetFrac;
+    return size.x * inset + GameConfig.pathPadPx;
+  }
+
+  double _spawnMaxX({required bool bush}) {
+    final inset = bush ? GameConfig.bushInsetFrac : GameConfig.spawnInsetFrac;
+    return size.x * (1.0 - inset) - GameConfig.pathPadPx;
+  }
+
+  /// Clamp by body edges — center alone still let the sprite clip into bushes.
+  double get _playerHalfW =>
+      (started ? player.size.x : GameConfig.playerWidth) * 0.45;
+
+  double get _pathMinX =>
+      size.x * GameConfig.pathInsetFrac + GameConfig.pathPadPx + _playerHalfW;
+
+  double get _pathMaxX =>
+      size.x * (1.0 - GameConfig.pathInsetFrac) -
+      GameConfig.pathPadPx -
+      _playerHalfW;
+
   void _missUpdate() {
     final basket = player.basketWorldCenter;
-    for (final item in List<FallingItem>.of(liveItems)) {
+    for (var i = liveItems.length - 1; i >= 0; i--) {
+      final item = liveItems[i];
       if (item.collected || item.stolen) continue;
 
       final pastBottom = item.position.y > size.y + 60;
@@ -584,11 +717,18 @@ class MineRivalsGame extends FlameGame
       if (!pastBottom && !pastFeet && !stuck) continue;
 
       if (!item.type.isHazard && (pastFeet || pastBottom)) {
+        // Magnet pickup miss — no chase penalty.
+        if (item.type.isMagnet) {
+          item.magnetBy = ItemMagnet.none;
+          _releaseLiveItem(item);
+          continue;
+        }
         // While trailing, jewels belong to the thief — don't punish a miss.
         if (item.type.isJewel && !lead.playerLeads) {
           _thiefSteal(item);
           continue;
         }
+        _goldStreak = 0;
         final nearMiss = (item.position.x - basket.x).abs() < 36;
         stats.player.registerMiss();
         cleanTimer = 0;
@@ -618,8 +758,7 @@ class MineRivalsGame extends FlameGame
   void _punishMistake(double baseLoss) {
     successStreak = 0;
     mistakeStreak = (mistakeStreak + 1).clamp(1, 6);
-    final extra =
-        (mistakeStreak - 1) * GameConfig.leadLossPerMistakeStreak;
+    final extra = (mistakeStreak - 1) * GameConfig.leadLossPerMistakeStreak;
     final add = (baseLoss + extra).clamp(0.0, 2.2);
     _leadDebt = (_leadDebt + add).clamp(0.0, GameConfig.leadDebtMax);
     _pulseBanner(
@@ -628,28 +767,27 @@ class MineRivalsGame extends FlameGame
     );
   }
 
-  /// Player ran into a spider web — sticky slow + the thief gains ground.
+  /// Player ran into a spider web — bomb-like hitch: slow + thief closes in.
+  /// (No crystal loss — that's bombs only.)
   void _triggerWebSnare() {
     _webSnareTimer = GameConfig.webSnareDuration;
-    cleanTimer = 0;
-    _leadDebt = (_leadDebt + GameConfig.leadLossOnWeb)
-        .clamp(0.0, GameConfig.leadDebtMax);
+    // Same chase pipeline as a bomb / miss so the thief actually gains.
+    _punishMistake(GameConfig.leadLossOnWeb);
     audio.play('miss');
     _pulseBanner('Паутина! Вор догоняет', const Color(0xFFB0BEC5));
     add(
       ScreenFlash(
         color: const Color(0xFFECEFF1),
-        peakAlpha: 0.14,
-        duration: 0.3,
+        peakAlpha: 0.16,
+        duration: 0.34,
       ),
     );
-    _shake(6);
+    _shake(10);
   }
 
   void _updateLeadDebt(double dt) {
     if (_leadDebt <= 0) return;
-    final rate =
-        GameConfig.leadDebtPerSec * (1 + (mistakeStreak - 1) * 0.22);
+    final rate = GameConfig.leadDebtPerSec * (1 + (mistakeStreak - 1) * 0.22);
     final step = min(_leadDebt, rate * dt);
     _leadDebt -= step;
     lead.applyDelta(-step);
@@ -664,10 +802,7 @@ class MineRivalsGame extends FlameGame
     final total = (baseGain + extra).clamp(0.0, 8.0);
     lead.applyDelta(total);
     if (showPullAway || successStreak >= 3) {
-      _pulseBanner(
-        '+${total.toStringAsFixed(0)} м',
-        const Color(0xFF66BB6A),
-      );
+      _pulseBanner('+${total.toStringAsFixed(0)} м', const Color(0xFF66BB6A));
     }
   }
 
@@ -678,12 +813,15 @@ class MineRivalsGame extends FlameGame
     if (!item.type.isJewel) {
       item.collected = true;
       if (item.type.isBomb) {
+        _goldStreak = 0;
         stats.player.registerCatch(isBomb: true);
         final lostCrystal = stats.player.loseOneRare();
         cleanTimer = 0;
         _punishMistake(GameConfig.leadLossOnBomb);
         audio.play('bomb');
-        add(ParticleBurst(position: item.position.clone(), color: Colors.orange));
+        add(
+          ParticleBurst(position: item.position.clone(), color: Colors.orange),
+        );
         add(
           ScreenFlash(
             color: const Color(0xFFFF6D00),
@@ -696,9 +834,7 @@ class MineRivalsGame extends FlameGame
           FloatingText(
             text: lostCrystal ? '−1' : 'Бум!',
             position: item.position.clone(),
-            color: lostCrystal
-                ? const Color(0xFFFF5252)
-                : Colors.orangeAccent,
+            color: lostCrystal ? const Color(0xFFFF5252) : Colors.orangeAccent,
           ),
         );
         _releaseLiveItem(item);
@@ -706,12 +842,15 @@ class MineRivalsGame extends FlameGame
       }
 
       if (item.type.isWeb) {
+        _goldStreak = 0;
         _triggerWebSnare();
-        add(ParticleBurst(
-          position: item.position.clone(),
-          color: const Color(0xFFECEFF1),
-          count: 8,
-        ));
+        add(
+          ParticleBurst(
+            position: item.position.clone(),
+            color: const Color(0xFFECEFF1),
+            count: 8,
+          ),
+        );
         add(
           FloatingText(
             text: item.type.popupLabel,
@@ -723,34 +862,72 @@ class MineRivalsGame extends FlameGame
         return;
       }
 
-      // Gold coin / gold bar (coal) / any future junk loot
+      if (item.type.isMagnet) {
+        _activateMagnetPower();
+        add(
+          ParticleBurst(
+            position: item.position.clone(),
+            color: item.type.color,
+            count: 14,
+          ),
+        );
+        add(
+          FloatingText(
+            text: item.type.popupLabel,
+            position: item.position.clone(),
+            color: item.type.color,
+            fontSize: 26,
+          ),
+        );
+        add(BasketSpark(position: player.basketWorldCenter.clone()));
+        audio.play('rare');
+        _releaseLiveItem(item);
+        return;
+      }
+
+      // Gold coin / gold bar (coal)
       stats.player.addItem(item.type);
       stats.player.registerCatch(isBomb: false);
       _rewardSuccess(GameConfig.leadGainOnCatch);
-      audio.play('catch');
+
+      final popup = _lootPopupFor(item.type);
+      if (item.type == ItemType.gold) {
+        _goldStreak++;
+        final pitch = 1.0 + min(0.48, (_goldStreak - 1) * 0.055);
+        audio.playCatchPitched(pitch);
+      } else {
+        audio.play('catch');
+      }
+
       add(
         ParticleBurst(
           position: item.position.clone(),
           color: item.type.color,
-          count: 10,
+          count: item.type == ItemType.gold ? 8 : 10,
         ),
       );
       add(
         FloatingText(
-          text: item.type.popupLabel,
+          text: popup,
           position: item.position.clone(),
-          color: item.type.color,
+          color: item.type == ItemType.gold
+              ? const Color(0xFFFFD54F)
+              : item.type.color,
+          fontSize: popup == '+10' ? 26 : 22,
         ),
       );
+      add(BasketSpark(position: player.basketWorldCenter.clone()));
       _releaseLiveItem(item);
       return;
     }
 
     item.collected = true;
 
-    // Jewels: contested by lead — thief owns them while ahead or blasting past.
-    final thiefOwnsJewel = !lead.playerLeads ||
-        (lead.isOvertaking && lead.pendingLeader == Leader.thief);
+    // Power magnet claims jewels even when the thief leads.
+    final thiefOwnsJewel =
+        !hasMagnetPower &&
+        (!lead.playerLeads ||
+            (lead.isOvertaking && lead.pendingLeader == Leader.thief));
     if (thiefOwnsJewel) {
       item.collected = false;
       _thiefSteal(item);
@@ -761,6 +938,7 @@ class MineRivalsGame extends FlameGame
     stats.player.registerCatch(isBomb: false);
     _rewardSuccess(GameConfig.leadGainOnRare, showPullAway: true);
     audio.play('rare');
+    add(BasketSpark(position: player.basketWorldCenter.clone()));
 
     if (stats.player.currentStreak > 0 &&
         stats.player.currentStreak % GameConfig.comboThreshold == 0) {
@@ -768,10 +946,10 @@ class MineRivalsGame extends FlameGame
       audio.play('combo');
       add(
         FloatingText(
-          text: '+1',
+          text: '+10',
           position: item.position.clone() - Vector2(0, 28),
           color: const Color(0xFFFFD54F),
-          fontSize: 22,
+          fontSize: 24,
         ),
       );
     }
@@ -791,6 +969,27 @@ class MineRivalsGame extends FlameGame
       ),
     );
     _releaseLiveItem(item);
+  }
+
+  void _activateMagnetPower() {
+    _magnetPowerTimer = GameConfig.magnetPowerDuration;
+    _pulseBanner('Магнит 15с!', const Color(0xFF29B6F6));
+    add(
+      ScreenFlash(
+        color: const Color(0xFF29B6F6),
+        peakAlpha: 0.14,
+        duration: 0.28,
+      ),
+    );
+  }
+
+  /// +1 normally; every 10th gold in a streak pops +10 (Subway juice).
+  String _lootPopupFor(ItemType type) {
+    if (type == ItemType.gold) {
+      final next = _goldStreak + 1;
+      return next > 0 && next % 10 == 0 ? '+10' : '+1';
+    }
+    return type.popupLabel;
   }
 
   void _thiefSteal(FallingItem item) {
@@ -882,6 +1081,8 @@ class MineRivalsGame extends FlameGame
     finished = true;
     _finishBeat = false;
     _webSnareTimer = 0;
+    _magnetPowerTimer = 0;
+    _goldStreak = 0;
     _playRate = 1;
     pauseEngine();
     overlays.add('results');
@@ -893,12 +1094,26 @@ class MineRivalsGame extends FlameGame
     for (final e in List<FallingItem>.of(liveItems)) {
       _releaseLiveItem(e);
     }
-    children.whereType<FloatingText>().toList().forEach((e) => e.removeFromParent());
-    children.whereType<CorridorTitle>().toList().forEach((e) => e.removeFromParent());
-    children.whereType<DustPuff>().toList().forEach((e) => e.removeFromParent());
-    children.whereType<ParticleBurst>().toList().forEach((e) => e.removeFromParent());
-    children.whereType<ScreenFlash>().toList().forEach((e) => e.removeFromParent());
-    children.whereType<ScreenShake>().toList().forEach((e) => e.removeFromParent());
+    liveItems.clear();
+    _dustLive = 0;
+    children.whereType<FloatingText>().toList().forEach(
+      (e) => e.removeFromParent(),
+    );
+    children.whereType<CorridorTitle>().toList().forEach(
+      (e) => e.removeFromParent(),
+    );
+    children.whereType<DustPuff>().toList().forEach(
+      (e) => e.removeFromParent(),
+    );
+    children.whereType<ParticleBurst>().toList().forEach(
+      (e) => e.removeFromParent(),
+    );
+    children.whereType<ScreenFlash>().toList().forEach(
+      (e) => e.removeFromParent(),
+    );
+    children.whereType<ScreenShake>().toList().forEach(
+      (e) => e.removeFromParent(),
+    );
 
     stats.player
       ..gold = 0
@@ -935,9 +1150,15 @@ class MineRivalsGame extends FlameGame
     mistakeStreak = 0;
     _leadDebt = 0;
     _webSnareTimer = 0;
+    _magnetPowerTimer = 0;
+    _goldStreak = 0;
     successStreak = 0;
     _lastBombLane = -1;
     _bombCooldown = 0;
+    _corridorDesired = -1;
+    _corridorApplied = -1;
+    _corridorFxAt = -1;
+    _corridorGen = 0;
     finished = false;
     _finaleAnnounced = false;
     _finishBeat = false;
@@ -969,37 +1190,45 @@ class MineRivalsGame extends FlameGame
     if (wantBlue && thiefBlue == null) {
       final t = ThiefComponent(kind: ThiefKind.blue);
       thiefBlue = t;
-      add(t);
-      final depth = lead.depthPositions(screenHeight: size.y);
-      t.position =
-          Vector2(size.x * 0.5 + t.laneBias, depth.thiefY + t.depthBias);
-      t.applyDepthScale(depth.thiefScale);
-      if (distance > 1) {
-        _pulseBanner('Синий вор!', const Color(0xFF42A5F5));
-      }
+      // Await load before scale — otherwise late _shadow crashes.
+      // ignore: discarded_futures
+      _mountBlueThief(t);
     } else if (!wantBlue && thiefBlue != null) {
       thiefBlue!.removeFromParent();
       thiefBlue = null;
     }
   }
 
-  void _syncCorridorTheme() {
-    final idx = (distance / GameConfig.corridorSegmentMeters)
-        .floor()
-        .clamp(0, GameConfig.corridorCount - 1);
-    final changed = idx != background.corridorIndex;
-    background.setCorridorIndex(idx);
-    if (!changed) return;
-
-    AssetLibrary.applyCorridorJewels(idx);
-    // Live jewels + pooled ones pick up the new shaft art.
-    for (final item in liveItems) {
-      if (item.type.isJewel) item.refreshSprite();
-    }
-    pool.clearJewels();
-
+  Future<void> _mountBlueThief(ThiefComponent t) async {
+    await add(t);
+    if (!isMounted || thiefBlue != t) return;
+    final depth = lead.depthPositions(screenHeight: size.y);
+    t.position = Vector2(size.x * 0.5 + t.laneBias, depth.thiefY + t.depthBias);
+    t.applyDepthScale(depth.thiefScale);
     if (distance > 1) {
-      children.whereType<CorridorTitle>().toList().forEach((e) => e.removeFromParent());
+      _pulseBanner('Синий вор!', const Color(0xFF42A5F5));
+    }
+  }
+
+  void _syncCorridorTheme() {
+    final idx = (distance / GameConfig.corridorSegmentMeters).floor().clamp(
+      0,
+      GameConfig.corridorCount - 1,
+    );
+    // Already applied this shaft — nothing to do.
+    if (idx == _corridorApplied && idx == _corridorDesired) return;
+    // Load already in flight for this idx.
+    if (idx == _corridorDesired && idx != _corridorApplied) return;
+
+    _corridorDesired = idx;
+    final gen = ++_corridorGen;
+
+    // Title / flash / audio once per shaft enter (not every frame).
+    if (idx != _corridorFxAt && distance > 1) {
+      _corridorFxAt = idx;
+      children.whereType<CorridorTitle>().toList().forEach(
+        (e) => e.removeFromParent(),
+      );
       add(
         CorridorTitle(
           label: '${idx + 1} из ${GameConfig.corridorCount}',
@@ -1009,27 +1238,41 @@ class MineRivalsGame extends FlameGame
       add(
         ScreenFlash(
           color: const Color(0xFFFFE082),
-          peakAlpha: 0.06,
-          duration: 0.55,
+          peakAlpha: 0.09,
+          duration: 0.85,
         ),
       );
       audio.play('overtake');
     }
+
+    // ignore: discarded_futures
+    AssetLibrary.ensureCorridorReady(idx).then((_) {
+      if (!isMounted || gen != _corridorGen) return;
+      background.setCorridorIndex(idx);
+      AssetLibrary.applyCorridorJewels(idx);
+      for (final item in liveItems) {
+        if (item.type.isJewel) item.refreshSprite();
+      }
+      _corridorApplied = idx;
+    });
   }
 
   @override
   void onDragStart(DragStartEvent event) {
     super.onDragStart(event);
-    dragX = event.localPosition.x;
+    dragX = event.localPosition.x.clamp(_pathMinX, _pathMaxX);
   }
 
   @override
   void onDragUpdate(DragUpdateEvent event) {
-    dragX = (dragX ?? player.position.x) + event.localDelta.x;
+    dragX = ((dragX ?? player.position.x) + event.localDelta.x).clamp(
+      _pathMinX,
+      _pathMaxX,
+    );
   }
 
   @override
   void onTapDown(TapDownEvent event) {
-    dragX = event.localPosition.x;
+    dragX = event.localPosition.x.clamp(_pathMinX, _pathMaxX);
   }
 }

@@ -20,6 +20,7 @@ double _displaySizeFor(ItemType type) {
   }
   if (type.isBomb) return GameConfig.bombDisplaySize;
   if (type.isWeb) return GameConfig.webDisplaySize;
+  if (type.isMagnet) return GameConfig.magnetDisplaySize;
   return GameConfig.lootDisplaySize;
 }
 
@@ -42,6 +43,17 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
   ItemMagnet magnetBy = ItemMagnet.none;
   double life = 0;
   double _pulse = Random().nextDouble() * pi * 2;
+  final Paint _glowPaint = Paint();
+  final Paint _webStrand = Paint()
+    ..color = Colors.white.withValues(alpha: 0.78)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.15
+    ..strokeCap = StrokeCap.round;
+  final Paint _webRing = Paint()
+    ..color = Colors.white.withValues(alpha: 0.4)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.0;
+  final Paint _webHub = Paint()..color = Colors.white.withValues(alpha: 0.85);
 
   bool get magnetized => magnetBy != ItemMagnet.none;
 
@@ -57,8 +69,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     fallSpeed = newSpeed;
     _pulse = Random().nextDouble() * pi * 2;
     // Corridor may have swapped jewel art since this instance was pooled.
-    final s = AssetLibrary.items[type];
-    if (s != null) sprite = s;
+    sprite = _spriteForType(type);
     if (type.isJewel) {
       final side = type == ItemType.legendary
           ? GameConfig.jewelDisplaySize * 1.12
@@ -68,14 +79,24 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
   }
 
   void refreshSprite() {
-    final s = AssetLibrary.items[type];
-    if (s != null) sprite = s;
+    sprite = _spriteForType(type);
     if (type.isJewel) {
       final side = type == ItemType.legendary
           ? GameConfig.jewelDisplaySize * 1.12
           : GameConfig.jewelDisplaySize;
       size = Vector2.all(side);
     }
+  }
+
+  /// Web/magnet drawn procedurally but Flame still requires a non-null sprite.
+  static Sprite? _spriteForType(ItemType type) {
+    final direct = AssetLibrary.items[type];
+    if (direct != null) return direct;
+    if (type.isWeb || type.isMagnet) {
+      return AssetLibrary.items[ItemType.bomb] ??
+          AssetLibrary.items[ItemType.gold];
+    }
+    return AssetLibrary.items[ItemType.gold];
   }
 
   /// Player may magnet anything they can catch.
@@ -103,12 +124,15 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
   @override
   Future<void> onLoad() async {
     await AssetLibrary.ensureLoaded();
-    sprite = AssetLibrary.items[type];
+    sprite = _spriteForType(type);
+    // Flame mounts only after onLoad — never leave sprite null.
+    assert(sprite != null, 'Missing sprite for $type');
     if (children.whereType<CircleHitbox>().isEmpty) {
       add(
         CircleHitbox(
           radius: size.x * (type.isBomb ? 0.38 : 0.55),
-          collisionType: CollisionType.active,
+          // Passive: no loot↔loot pairs — catch is distance/magnet driven.
+          collisionType: CollisionType.passive,
         ),
       );
     }
@@ -158,12 +182,8 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     if (type.isJewel) {
       final pulse = 0.55 + 0.2 * sin(_pulse);
       final c = Offset(size.x / 2, size.y * 0.52);
-      // One soft halo — enough to read gems without heavy overdraw.
-      canvas.drawCircle(
-        c,
-        size.x * 0.48,
-        Paint()..color = type.color.withValues(alpha: 0.18 + pulse * 0.12),
-      );
+      _glowPaint.color = type.color.withValues(alpha: 0.18 + pulse * 0.12);
+      canvas.drawCircle(c, size.x * 0.48, _glowPaint);
     }
 
     if (type.isWeb) {
@@ -171,15 +191,17 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
       return;
     }
 
+    if (type.isMagnet) {
+      _renderMagnet(canvas);
+      return;
+    }
+
     if (type.isBomb) {
       final warn = 0.5 + 0.5 * sin(_pulse * 1.55);
       final c = Offset(size.x / 2, size.y / 2);
-      canvas.drawCircle(
-        c,
-        size.x * (0.40 + warn * 0.08),
-        Paint()
-          ..color = const Color(0xFFFF1744).withValues(alpha: 0.12 + warn * 0.22),
-      );
+      _glowPaint.color =
+          const Color(0xFFFF1744).withValues(alpha: 0.12 + warn * 0.22);
+      canvas.drawCircle(c, size.x * (0.40 + warn * 0.08), _glowPaint);
     }
 
     // Plain sprite blit — no ColorFilter saveLayer (FPS).
@@ -192,32 +214,50 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     final r = size.x * 0.48;
     final breath = 0.9 + 0.1 * sin(_pulse * 0.9);
 
-    final strand = Paint()
-      ..color = Colors.white.withValues(alpha: 0.78)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.15
-      ..strokeCap = StrokeCap.round;
-    final ringPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.4)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-
     const spokes = 6;
     for (var i = 0; i < spokes; i++) {
       final a = (i / spokes) * pi * 2;
       canvas.drawLine(
         c,
         Offset(c.dx + cos(a) * r, c.dy + sin(a) * r),
-        strand,
+        _webStrand,
       );
     }
     for (final ring in const [0.4, 0.85]) {
-      canvas.drawCircle(c, r * ring * breath, ringPaint);
+      canvas.drawCircle(c, r * ring * breath, _webRing);
     }
+    canvas.drawCircle(c, 2.0, _webHub);
+  }
+
+  /// Simple horseshoe magnet — readable at loot size without a sheet crop.
+  void _renderMagnet(Canvas canvas) {
+    final c = Offset(size.x / 2, size.y / 2);
+    final pulse = 0.55 + 0.2 * sin(_pulse * 1.4);
+    _glowPaint.color =
+        const Color(0xFF29B6F6).withValues(alpha: 0.22 + pulse * 0.18);
+    canvas.drawCircle(c, size.x * 0.46, _glowPaint);
+
+    final body = Paint()
+      ..color = const Color(0xFF039BE5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.x * 0.22
+      ..strokeCap = StrokeCap.butt;
+    final tip = Paint()..color = const Color(0xFFE53935);
+    final tipB = Paint()..color = const Color(0xFF1E88E5);
+
+    final r = size.x * 0.28;
+    final rect = Rect.fromCircle(center: c - Offset(0, size.y * 0.04), radius: r);
+    canvas.drawArc(rect, pi * 0.15, pi * 0.7, false, body);
+    // Pole tips
     canvas.drawCircle(
-      c,
-      2.0,
-      Paint()..color = Colors.white.withValues(alpha: 0.85),
+      Offset(c.dx - r * 0.95, c.dy + r * 0.35),
+      size.x * 0.11,
+      tip,
+    );
+    canvas.drawCircle(
+      Offset(c.dx + r * 0.95, c.dy + r * 0.35),
+      size.x * 0.11,
+      tipB,
     );
   }
 }
