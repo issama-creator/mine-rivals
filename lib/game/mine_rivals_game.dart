@@ -39,6 +39,7 @@ class MineRivalsGame extends FlameGame
 
   late PlayerComponent player;
   late ThiefComponent thief;
+  ThiefComponent? thiefBlue;
   late ParallaxBackground background;
   late ChaseArrow chaseArrow;
 
@@ -47,8 +48,10 @@ class MineRivalsGame extends FlameGame
   double cleanTimer = 0;
   double dustTimer = 0;
   double cameraBob = 0;
-  /// Consecutive misses/bombs — each one pushes the thief further away.
+  /// Consecutive misses/bombs — each one adds chase pressure.
   int mistakeStreak = 0;
+  /// Lead meters still draining after mistakes (thief approaches over time).
+  double _leadDebt = 0;
   /// Consecutive clean catches — you pull further ahead of the thief.
   int successStreak = 0;
   Vector2 shakeOffset = Vector2.zero();
@@ -80,6 +83,13 @@ class MineRivalsGame extends FlameGame
 
   bool get inFinale =>
       remainingMeters <= GameConfig.finaleMeters && !finished;
+
+  List<ThiefComponent> get _pack {
+    return [
+      thief,
+      if (thiefBlue != null) thiefBlue!,
+    ];
+  }
 
   @override
   Color backgroundColor() => const Color(0xFF1A120B);
@@ -147,19 +157,29 @@ class MineRivalsGame extends FlameGame
   void _layoutActors() {
     final depth = lead.depthPositions(screenHeight: size.y);
     player.position = Vector2(size.x * 0.5, depth.playerY);
-    thief.position = Vector2(size.x * 0.5, depth.thiefY);
     player.applyDepthScale(depth.playerScale);
-    thief.applyDepthScale(depth.thiefScale);
+    for (final t in _pack) {
+      t.position =
+          Vector2(size.x * 0.5 + t.laneBias, depth.thiefY + t.depthBias);
+      t.applyDepthScale(depth.thiefScale);
+    }
     _updateDrawOrder();
   }
 
   void _updateDrawOrder() {
-    if (player.position.y >= thief.position.y) {
-      player.priority = 25;
-      thief.priority = 12;
+    var prio = 10;
+    final ordered = _pack.toList()
+      ..sort((a, b) => a.position.y.compareTo(b.position.y));
+    for (final t in ordered) {
+      t.priority = prio;
+      prio += 2;
+    }
+    final frontThiefY =
+        _pack.map((t) => t.position.y).fold<double>(0, max);
+    if (player.position.y >= frontThiefY) {
+      player.priority = prio + 4;
     } else {
-      player.priority = 12;
-      thief.priority = 25;
+      player.priority = 8;
     }
   }
 
@@ -203,23 +223,33 @@ class MineRivalsGame extends FlameGame
     _playRate += (targetRate - _playRate) * (1 - (1 / (1 + 6 * dt)));
     final step = dt * _playRate;
     final pace = GameConfig.runSpeedAt(progress);
+    final animRate = GameConfig.runAnimRateAt(progress);
 
     distance += pace * step;
     background.setWorldSpeed(pace * _playRate);
+    player.setRunAnimRate(animRate);
+    for (final t in _pack) {
+      t.setRunAnimRate(animRate);
+    }
     _syncCorridorTheme();
+    _syncExtraThieves();
     _syncFinale();
     cameraBob += step * 3.2;
 
-    final playingClean = cleanTimer > 2.5;
+    _updateLeadDebt(step);
+    final playingClean = cleanTimer > 2.5 && _leadDebt <= 0;
     lead.update(step, playingClean: playingClean);
     cleanTimer += step;
 
     final depth = lead.depthPositions(screenHeight: size.y, dt: step);
     final bob = sin(cameraBob) * 0.35;
     player.position.y = depth.playerY + bob * 0.25 + shakeOffset.y * 0.35;
-    thief.position.y = depth.thiefY + bob * 0.15 + shakeOffset.y * 0.2;
     player.applyDepthScale(depth.playerScale, step);
-    thief.applyDepthScale(depth.thiefScale, step);
+    for (final t in _pack) {
+      t.position.y =
+          depth.thiefY + t.depthBias + bob * 0.15 + shakeOffset.y * 0.2;
+      t.applyDepthScale(depth.thiefScale, step);
+    }
 
     final minX = 70.0;
     final maxX = size.x - 70.0;
@@ -227,16 +257,18 @@ class MineRivalsGame extends FlameGame
     player.moveToward(desiredX + shakeOffset.x, minX, maxX, step);
     final closeBehind = lead.playerLeads && lead.leadDistance.abs() < 2.2;
     final sprinting = lead.isOvertaking && lead.sprintOvertake;
-    thief.runLane(
-      screenCenterX: size.x * 0.5,
-      playerX: player.position.x,
-      dt: step,
-      overtaking: lead.isOvertaking,
-      overtakeT: lead.overtakeT,
-      breathingDownNeck:
-          closeBehind || (!lead.playerLeads && lead.leadDistance.abs() < 2.2),
-      sprinting: sprinting,
-    );
+    for (final t in _pack) {
+      t.runLane(
+        screenCenterX: size.x * 0.5,
+        playerX: player.position.x,
+        dt: step,
+        overtaking: lead.isOvertaking,
+        overtakeT: lead.overtakeT,
+        breathingDownNeck:
+            closeBehind || (!lead.playerLeads && lead.leadDistance.abs() < 2.2),
+        sprinting: sprinting && t.kind == ThiefKind.primary,
+      );
+    }
 
     _updateChaseArrow();
     _updateDrawOrder();
@@ -301,11 +333,9 @@ class MineRivalsGame extends FlameGame
       if (!item.type.isJewel) {
         if (item.type.isBomb) {
           item.setPlayerMagnet(false);
-          final dx = (basket.x - item.position.x).abs();
-          final dy = (basket.y - item.position.y).abs();
-          // Tighter than loot — glancing pass doesn't always explode.
-          if (dx <= GameConfig.bombCatchRadius &&
-              dy <= GameConfig.bombCatchRadius) {
+          // Strict circular touch vs basket — no AABB near-miss fakes.
+          final dist = (basket - item.position).length;
+          if (dist <= GameConfig.bombCatchRadius) {
             onItemCaught(item);
           }
         } else {
@@ -356,8 +386,6 @@ class MineRivalsGame extends FlameGame
       return;
     }
 
-    final stealPoint = thief.position - Vector2(0, thief.size.y * 0.72);
-
     for (final item in children.whereType<FallingItem>().toList()) {
       if (item.collected || item.stolen) continue;
 
@@ -367,13 +395,25 @@ class MineRivalsGame extends FlameGame
         continue;
       }
 
+      ThiefComponent? nearest;
+      var bestDist = double.infinity;
+      for (final t in _pack) {
+        final stealPoint = t.position - Vector2(0, t.size.y * 0.72);
+        final d = (stealPoint - item.position).length;
+        if (d < bestDist) {
+          bestDist = d;
+          nearest = t;
+        }
+      }
+      if (nearest == null) continue;
+
+      final stealPoint =
+          nearest.position - Vector2(0, nearest.size.y * 0.72);
       final delta = stealPoint - item.position;
       final dist = delta.length;
-
       final inRange = dist < GameConfig.thiefMagnetRadius &&
-          item.position.y > stealPoint.y - 80 &&
-          item.position.y < stealPoint.y + 40 &&
-          item.life < 6.0;
+          item.position.y > nearest.position.y - nearest.size.y * 1.1 &&
+          item.position.y < nearest.position.y + 40;
 
       if (inRange) {
         item.setThiefMagnet(true);
@@ -385,7 +425,7 @@ class MineRivalsGame extends FlameGame
         item.setThiefMagnet(false);
       }
 
-      if (dist < 32) {
+      if (dist < 22) {
         _thiefSteal(item);
       }
     }
@@ -489,6 +529,11 @@ class MineRivalsGame extends FlameGame
       if (!pastBottom && !pastFeet && !stuck) continue;
 
       if (!item.type.isBomb && (pastFeet || pastBottom)) {
+        // While trailing, jewels belong to the thief — don't punish a miss.
+        if (item.type.isJewel && !lead.playerLeads) {
+          _thiefSteal(item);
+          continue;
+        }
         final nearMiss = (item.position.x - basket.x).abs() < 36;
         stats.player.registerMiss();
         cleanTimer = 0;
@@ -514,23 +559,33 @@ class MineRivalsGame extends FlameGame
     }
   }
 
-  /// Each mistake stacks — thief can pull +5…+10m ahead on a bad streak.
+  /// Mistakes queue chase debt — thief closes the gap over time, no instant pass.
   void _punishMistake(double baseLoss) {
     successStreak = 0;
     mistakeStreak = (mistakeStreak + 1).clamp(1, 6);
     final extra =
         (mistakeStreak - 1) * GameConfig.leadLossPerMistakeStreak;
-    final total = (baseLoss + extra).clamp(0.0, 10.0);
-    lead.applyDelta(-total);
+    final add = (baseLoss + extra).clamp(0.0, 2.2);
+    _leadDebt = (_leadDebt + add).clamp(0.0, GameConfig.leadDebtMax);
     _pulseBanner(
-      '−${total.toStringAsFixed(0)} м',
+      mistakeStreak <= 1 ? 'Вор догоняет…' : 'Вор всё ближе!',
       const Color(0xFFFF7043),
     );
+  }
+
+  void _updateLeadDebt(double dt) {
+    if (_leadDebt <= 0) return;
+    final rate =
+        GameConfig.leadDebtPerSec * (1 + (mistakeStreak - 1) * 0.22);
+    final step = min(_leadDebt, rate * dt);
+    _leadDebt -= step;
+    lead.applyDelta(-step);
   }
 
   /// Clean catches stack — you open a bigger gap behind you.
   void _rewardSuccess(double baseGain, {bool showPullAway = false}) {
     mistakeStreak = 0;
+    _leadDebt = 0;
     successStreak = (successStreak + 1).clamp(1, 8);
     final extra = (successStreak - 1) * GameConfig.successStreakLeadBonus;
     final total = (baseGain + extra).clamp(0.0, 8.0);
@@ -551,6 +606,7 @@ class MineRivalsGame extends FlameGame
       item.collected = true;
       if (item.type.isBomb) {
         stats.player.registerCatch(isBomb: true);
+        final lostCrystal = stats.player.loseOneRare();
         cleanTimer = 0;
         _punishMistake(GameConfig.leadLossOnBomb);
         audio.play('bomb');
@@ -565,9 +621,11 @@ class MineRivalsGame extends FlameGame
         _shake(14);
         add(
           FloatingText(
-            text: '−1',
+            text: lostCrystal ? '−1' : 'Бум!',
             position: item.position.clone(),
-            color: Colors.orangeAccent,
+            color: lostCrystal
+                ? const Color(0xFFFF5252)
+                : Colors.orangeAccent,
           ),
         );
         pool.release(item);
@@ -599,8 +657,10 @@ class MineRivalsGame extends FlameGame
 
     item.collected = true;
 
-    // Jewels: contested by lead.
-    if (!lead.playerLeads && !lead.isOvertaking) {
+    // Jewels: contested by lead — thief owns them while ahead or blasting past.
+    final thiefOwnsJewel = !lead.playerLeads ||
+        (lead.isOvertaking && lead.pendingLeader == Leader.thief);
+    if (thiefOwnsJewel) {
       item.collected = false;
       _thiefSteal(item);
       return;
@@ -757,6 +817,7 @@ class MineRivalsGame extends FlameGame
     spawnTimer = 0;
     cleanTimer = 0;
     mistakeStreak = 0;
+    _leadDebt = 0;
     successStreak = 0;
     _lastBombLane = -1;
     _bombCooldown = 0;
@@ -771,8 +832,38 @@ class MineRivalsGame extends FlameGame
     dragX = null;
     chaseArrow.setActive(false);
     background.resetCorridors();
+    AssetLibrary.applyCorridorJewels(0);
+    pool.clearJewels();
+    _clearExtraThieves();
     _layoutActors();
     resumeEngine();
+  }
+
+  void _clearExtraThieves() {
+    thiefBlue?.removeFromParent();
+    thiefBlue = null;
+  }
+
+  /// After shaft 6 → blue joins as the second rival.
+  void _syncExtraThieves() {
+    final level = background.corridorIndex + 1;
+    final wantBlue = level >= GameConfig.blueThiefFromCorridor;
+
+    if (wantBlue && thiefBlue == null) {
+      final t = ThiefComponent(kind: ThiefKind.blue);
+      thiefBlue = t;
+      add(t);
+      final depth = lead.depthPositions(screenHeight: size.y);
+      t.position =
+          Vector2(size.x * 0.5 + t.laneBias, depth.thiefY + t.depthBias);
+      t.applyDepthScale(depth.thiefScale);
+      if (distance > 1) {
+        _pulseBanner('Синий вор!', const Color(0xFF42A5F5));
+      }
+    } else if (!wantBlue && thiefBlue != null) {
+      thiefBlue!.removeFromParent();
+      thiefBlue = null;
+    }
   }
 
   void _syncCorridorTheme() {
@@ -781,12 +872,20 @@ class MineRivalsGame extends FlameGame
         .clamp(0, GameConfig.corridorCount - 1);
     final changed = idx != background.corridorIndex;
     background.setCorridorIndex(idx);
-    if (changed && distance > 1) {
-      // Clear any leftover titles, then show a quiet top label for 2s.
+    if (!changed) return;
+
+    AssetLibrary.applyCorridorJewels(idx);
+    // Live jewels + pooled ones pick up the new shaft art.
+    for (final item in children.whereType<FallingItem>()) {
+      if (item.type.isJewel) item.refreshSprite();
+    }
+    pool.clearJewels();
+
+    if (distance > 1) {
       children.whereType<CorridorTitle>().toList().forEach((e) => e.removeFromParent());
       add(
         CorridorTitle(
-          label: '${idx + 1}-й уровень',
+          label: '${idx + 1} из ${GameConfig.corridorCount}',
           position: Vector2(size.x * 0.5, 52),
         ),
       );

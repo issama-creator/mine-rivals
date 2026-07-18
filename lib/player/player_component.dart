@@ -17,16 +17,27 @@ class PlayerComponent extends SpriteAnimationComponent {
   late GroundShadow _shadow;
   double targetX = 0;
   double _displayScale = 1;
+  double _animRate = 1;
 
   Vector2 get basketWorldCenter {
     final local = Vector2(size.x * 0.5, size.y * 0.12);
     return absolutePositionOf(local);
   }
 
+  void setRunAnimRate(double rate) {
+    _animRate = rate.clamp(0.9, 2.1);
+  }
+
+  @override
+  void update(double dt) {
+    // Faster stride as corridors get quicker.
+    super.update(dt * _animRate);
+  }
+
   @override
   Future<void> onLoad() async {
     await AssetLibrary.ensureLoaded();
-    animation = AssetLibrary.minerRun;
+    animation = AssetLibrary.minerRunForSelected();
     playing = true;
 
     _shadow = GroundShadow();

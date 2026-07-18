@@ -8,7 +8,7 @@ class CorridorTitle extends PositionComponent with HasPaint {
     required Vector2 position,
   }) : super(
           position: position,
-          size: Vector2(280, 36),
+          size: Vector2(220, 40),
           anchor: Anchor.topCenter,
           priority: 80,
         );
@@ -43,14 +43,14 @@ class CorridorTitle extends PositionComponent with HasPaint {
       text: TextSpan(
         text: label,
         style: TextStyle(
-          color: const Color(0xFFFFE082).withValues(alpha: a * 0.92),
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.6,
+          color: const Color(0xFFFFE082).withValues(alpha: a * 0.95),
+          fontSize: 16,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.0,
           shadows: [
             Shadow(
-              blurRadius: 8,
-              color: Colors.black.withValues(alpha: a * 0.65),
+              blurRadius: 10,
+              color: Colors.black.withValues(alpha: a * 0.7),
             ),
           ],
         ),

@@ -8,7 +8,9 @@ import 'package:flame/flame.dart';
 import 'package:flame/sprite.dart';
 
 import '../items/item_type.dart';
+import '../systems/game_settings.dart';
 import 'game_config.dart';
+import 'player_skins.dart';
 
 /// Loads PNGs, strips sheet backgrounds to real alpha, slices run cycles.
 class AssetLibrary {
@@ -16,27 +18,46 @@ class AssetLibrary {
 
   static SpriteAnimation? minerRun;
   static SpriteAnimation? thiefRun;
+  static SpriteAnimation? thiefRunBlue;
+  /// All playable skins keyed by [PlayerSkin.id].
+  static final Map<String, SpriteAnimation> skinRuns = {};
 
   /// First corridor (classic) — kept for callers that expect a single sprite.
   static Sprite? tunnel;
 
-  /// Ordered biomes: classic → warm → forest → ice (one per km).
+  /// Ordered shafts from assets/images/bgc/1.png … 10.png.
   static final List<Sprite> corridors = [];
   static const List<String> corridorNames = [
-    'Кристальная шахта',
-    'Тёплая шахта',
-    'Зелёная шахта',
-    'Ледяная шахта',
+    'Шахта 1',
+    'Шахта 2',
+    'Шахта 3',
+    'Шахта 4',
+    'Шахта 5',
+    'Шахта 6',
+    'Шахта 7',
+    'Шахта 8',
+    'Шахта 9',
+    'Шахта 10',
   ];
   static final Map<ItemType, Sprite> items = {};
-  static const int _assetVersion = 8;
+  /// Per corridor: 3 gem sprites [0]=diamond, [1]=ruby, [2]=emerald.
+  static final List<List<Sprite>> corridorJewels = [];
+  static const int _assetVersion = 19;
   static int _loadedVersion = 0;
 
   static bool get ready =>
       minerRun != null &&
       thiefRun != null &&
+      thiefRunBlue != null &&
+      skinRuns.length == PlayerSkins.all.length &&
       corridors.length == GameConfig.corridorCount &&
+      corridorJewels.length == GameConfig.corridorCount &&
       _loadedVersion == _assetVersion;
+
+  static SpriteAnimation minerRunForSelected() {
+    final id = GameSettings.instance.selectedSkinId;
+    return skinRuns[id] ?? skinRuns[PlayerSkins.defaultId] ?? minerRun!;
+  }
 
   static Sprite corridorAt(int index) {
     if (corridors.isEmpty) {
@@ -51,45 +72,82 @@ class AssetLibrary {
     items.clear();
     minerRun = null;
     thiefRun = null;
+    thiefRunBlue = null;
+    skinRuns.clear();
     tunnel = null;
     corridors.clear();
+    corridorJewels.clear();
 
     Flame.images.prefix = '';
 
-    final minerImg = await _loadWhiteKeyed('assets/persnew.png');
-    final thiefImg = await _loadWhiteKeyed('assets/vor1.png');
+    // Playable skins (transparent 9×2 sheets).
+    for (final skin in PlayerSkins.all) {
+      final img = await Flame.images.load(skin.sheetAsset);
+      skinRuns[skin.id] = await _sliceRunAnimationStabilized(
+        img,
+        columns: 9,
+        rows: 2,
+        stepTime: 1 / GameConfig.minerRunFps,
+      );
+    }
+    minerRun = minerRunForSelected();
+
+    final thiefImg = await Flame.images.load('assets/images/vors/vor1.png');
+    final thiefBlueImg =
+        await Flame.images.load('assets/images/vors/vor-blue.png');
     final elementsImg = await _loadBlackKeyed('assets/elements.png');
-    const corridorPaths = [
-      'assets/bgc.png',
-      'assets/mine_corridor_warm.png',
-      'assets/mine_corridor_forest.png',
-      'assets/mine_corridor_ice.png',
+    final corridorPaths = [
+      for (var i = 1; i <= GameConfig.corridorCount; i++)
+        'assets/images/bgc/$i.png',
     ];
     final corridorImgs = <ui.Image>[];
     for (final path in corridorPaths) {
       corridorImgs.add(await Flame.images.load(path));
     }
 
-    // Miner: stabilize feet + smoother step rate (was looking jittery).
-    minerRun = await _sliceRunAnimationStabilized(
-      minerImg,
-      columns: 9,
-      rows: 2,
-      stepTime: 1 / GameConfig.minerRunFps,
-    );
-    thiefRun = await _sliceRunAnimationStabilized(
-      thiefImg,
-      columns: 9,
-      rows: 2,
-      stepTime: 1 / GameConfig.runFps,
-    );
+    // Per-corridor crystal crops: 0 diamond, 1 ruby, 2 emerald, 3 amethyst, 4 legendary.
+    for (var c = 1; c <= GameConfig.corridorCount; c++) {
+      final gems = <Sprite>[];
+      for (var g = 0; g < 5; g++) {
+        final img = await Flame.images.load(
+          'assets/images/kristales/crops/c${c}_$g.png',
+        );
+        gems.add(Sprite(img));
+      }
+      corridorJewels.add(gems);
+    }
+
+    Future<SpriteAnimation> sliceThief(ui.Image img) {
+      return _sliceRunAnimationStabilized(
+        img,
+        columns: 9,
+        rows: 2,
+        stepTime: 1 / GameConfig.runFps,
+      );
+    }
+
+    thiefRun = await sliceThief(thiefImg);
+    thiefRunBlue = await sliceThief(thiefBlueImg);
     for (final img in corridorImgs) {
       corridors.add(Sprite(img));
     }
     tunnel = corridors.first;
 
     _sliceElements(elementsImg);
+    applyCorridorJewels(0);
     _loadedVersion = _assetVersion;
+  }
+
+  /// Swap jewel art for the active shaft — coins/bombs stay global.
+  static void applyCorridorJewels(int corridorIndex) {
+    if (corridorJewels.isEmpty) return;
+    final i = corridorIndex.clamp(0, corridorJewels.length - 1);
+    final gems = corridorJewels[i];
+    items[ItemType.diamond] = gems[0];
+    items[ItemType.ruby] = gems[1];
+    items[ItemType.emerald] = gems[2];
+    items[ItemType.amethyst] = gems[3];
+    items[ItemType.legendary] = gems[4];
   }
 
   /// Slice frames and bottom-center each one so the run cycle doesn't hop.
@@ -207,20 +265,14 @@ class AssetLibrary {
       );
     }
 
-    final diamond = crop(w * 0.08, h * 0.12, w * 0.30, h * 0.52);
     final coin = crop(w * 0.38, h * 0.10, w * 0.62, h * 0.50);
     final bomb = crop(w * 0.68, h * 0.10, w * 0.92, h * 0.52);
     final bar = crop(w * 0.08, h * 0.52, w * 0.32, h * 0.88);
-    final bag = crop(w * 0.36, h * 0.50, w * 0.64, h * 0.92);
 
-    items[ItemType.diamond] = diamond;
     items[ItemType.gold] = coin;
     items[ItemType.bomb] = bomb;
     items[ItemType.coal] = bar;
-    items[ItemType.legendary] = bag;
-    items[ItemType.ruby] = diamond;
-    items[ItemType.emerald] = diamond;
-    items[ItemType.amethyst] = diamond;
+    // Jewels are applied per-corridor via applyCorridorJewels.
   }
 
   static Future<ui.Image> _loadWhiteKeyed(String path) async {

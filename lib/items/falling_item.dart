@@ -5,6 +5,7 @@ import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
 import '../game/asset_library.dart';
+import '../game/game_config.dart';
 import '../game/mine_rivals_game.dart';
 import '../player/player_component.dart';
 import 'item_type.dart';
@@ -18,8 +19,21 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     required this.fallSpeed,
   }) : super(
           position: position,
-          size: Vector2.all(
-            type.isJewel ? 44 : type.isBomb ? 38 * 0.9 : 38,
+          size: Vector2(
+            type.isJewel
+                ? (type == ItemType.legendary
+                    ? GameConfig.jewelDisplaySize * 1.12
+                    : GameConfig.jewelDisplaySize)
+                : type.isBomb
+                    ? GameConfig.bombDisplaySize
+                    : GameConfig.lootDisplaySize,
+            type.isJewel
+                ? (type == ItemType.legendary
+                    ? GameConfig.jewelDisplaySize * 1.12
+                    : GameConfig.jewelDisplaySize)
+                : type.isBomb
+                    ? GameConfig.bombDisplaySize
+                    : GameConfig.lootDisplaySize,
           ),
           anchor: Anchor.center,
           priority: 30,
@@ -35,20 +49,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
 
   bool get magnetized => magnetBy != ItemMagnet.none;
 
-  ColorFilter? get _tint {
-    switch (type) {
-      case ItemType.ruby:
-        return const ColorFilter.mode(Color(0xFFFF5252), BlendMode.modulate);
-      case ItemType.emerald:
-        return const ColorFilter.mode(Color(0xFF69F0AE), BlendMode.modulate);
-      case ItemType.amethyst:
-        return const ColorFilter.mode(Color(0xFFE040FB), BlendMode.modulate);
-      case ItemType.legendary:
-        return const ColorFilter.mode(Color(0xFFFF8F00), BlendMode.modulate);
-      default:
-        return null;
-    }
-  }
+  ColorFilter? get _tint => null;
 
   void recycle({
     required Vector2 newPosition,
@@ -61,6 +62,26 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     position.setFrom(newPosition);
     fallSpeed = newSpeed;
     _pulse = Random().nextDouble() * pi * 2;
+    // Corridor may have swapped jewel art since this instance was pooled.
+    final s = AssetLibrary.items[type];
+    if (s != null) sprite = s;
+    if (type.isJewel) {
+      final side = type == ItemType.legendary
+          ? GameConfig.jewelDisplaySize * 1.12
+          : GameConfig.jewelDisplaySize;
+      size = Vector2.all(side);
+    }
+  }
+
+  void refreshSprite() {
+    final s = AssetLibrary.items[type];
+    if (s != null) sprite = s;
+    if (type.isJewel) {
+      final side = type == ItemType.legendary
+          ? GameConfig.jewelDisplaySize * 1.12
+          : GameConfig.jewelDisplaySize;
+      size = Vector2.all(side);
+    }
   }
 
   /// Player may magnet anything they can catch.
@@ -109,13 +130,13 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     }
     life += dt;
     final game = findGame();
-    final rate = game is MineRivalsGame ? game.playRate : 1.0;
+    // background.speed already includes playRate — don't multiply again.
     final worldSpeed =
         game is MineRivalsGame ? game.background.speed : fallSpeed;
     if (!magnetized) {
-      position.y += worldSpeed * dt * rate;
+      position.y += worldSpeed * dt;
     } else {
-      position.y += worldSpeed * 0.35 * dt * rate;
+      position.y += worldSpeed * 0.35 * dt;
     }
     _pulse += dt * 4;
   }
@@ -126,6 +147,8 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     PositionComponent other,
   ) {
     super.onCollisionStart(intersectionPoints, other);
+    // Bombs use the tight distance gate in the game loop — not fat hitboxes.
+    if (type.isBomb) return;
     // Only the player basket collects via collision — thief has no hitbox.
     final owner = other is PlayerComponent ? other : other.parent;
     if (owner is PlayerComponent) {
@@ -139,15 +162,58 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
   @override
   void render(Canvas canvas) {
     if (type.isJewel) {
-      final glow = 0.22 + 0.12 * sin(_pulse);
+      final pulse = 0.55 + 0.2 * sin(_pulse);
+      final c = Offset(size.x / 2, size.y * 0.52);
+      // Soft halo so gems don't vanish into corridor art.
       canvas.drawCircle(
-        Offset(size.x / 2, size.y / 2),
-        size.x * 0.5,
-        Paint()..color = type.color.withValues(alpha: glow * 0.28),
+        c,
+        size.x * 0.52,
+        Paint()..color = type.color.withValues(alpha: 0.16 + pulse * 0.10),
+      );
+      canvas.drawCircle(
+        c,
+        size.x * 0.38,
+        Paint()
+          ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.10 + pulse * 0.06),
+      );
+      // Thin colored rim — light outline, not a heavy frame.
+      canvas.drawCircle(
+        c,
+        size.x * 0.46,
+        Paint()
+          ..color = type.color.withValues(alpha: 0.45 + pulse * 0.20)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.35,
       );
     }
 
-    final tint = _tint;
+    if (type.isBomb) {
+      final warn = 0.5 + 0.5 * sin(_pulse * 1.55);
+      final c = Offset(size.x / 2, size.y / 2);
+      // Soft pulsing red — no hard permanent ring.
+      canvas.drawCircle(
+        c,
+        size.x * (0.42 + warn * 0.10),
+        Paint()
+          ..color = const Color(0xFFFF1744).withValues(alpha: 0.10 + warn * 0.28),
+      );
+      canvas.drawCircle(
+        c,
+        size.x * (0.28 + warn * 0.06),
+        Paint()
+          ..color = const Color(0xFFFF5252).withValues(alpha: 0.06 + warn * 0.18),
+      );
+    }
+
+    final tint = type.isBomb
+        ? const ColorFilter.matrix(<double>[
+            // Boost red / lift midtones so the bomb pops on brown corridors.
+            1.35, 0.05, 0.05, 0, 18,
+            0.05, 1.05, 0.05, 0, 8,
+            0.00, 0.00, 1.00, 0, 4,
+            0, 0, 0, 1, 0,
+          ])
+        : _tint;
     if (tint != null) {
       canvas.saveLayer(size.toRect(), Paint()..colorFilter = tint);
       super.render(canvas);

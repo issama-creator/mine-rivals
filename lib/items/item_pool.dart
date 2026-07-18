@@ -37,6 +37,13 @@ class ItemPool {
     }
   }
 
+  /// Drop pooled jewels so the next spawn uses the new corridor sprites.
+  void clearJewels() {
+    for (final t in ItemType.values) {
+      if (t.isJewel) _inactive[t]!.clear();
+    }
+  }
+
   ItemType rollType({required double progress}) {
     final roll = _rng.nextDouble();
     final bombChance = 0.08 + progress * 0.1;

@@ -61,15 +61,30 @@ flutter:
 
   assets:
     - assets/persnew.png
-    - assets/vor1.png
     - assets/elements.png
     - assets/tunnel.png
-    - assets/bgc.png
-    - assets/mine_corridor_warm.png
-    - assets/mine_corridor_forest.png
-    - assets/mine_corridor_ice.png
-    - assets/images/
     - assets/audio/
+    - assets/images/bgc/
+    - assets/images/kristales/
+    - assets/images/kristales/crops/
+    - assets/images/vors/
+    # Skins — listed explicitly (directory entries can miss on some rebuilds).
+    - assets/images/skins/player.png
+    - assets/images/skins/woman.png
+    - assets/images/skins/ninja.png
+    - assets/images/skins/robot.png
+    - assets/images/skins/monkey.png
+    - assets/images/skins/panda.png
+    - assets/images/skins/pingvin.png
+    - assets/images/skins/mag.png
+    - assets/images/skins/preview/player.png
+    - assets/images/skins/preview/woman.png
+    - assets/images/skins/preview/ninja.png
+    - assets/images/skins/preview/robot.png
+    - assets/images/skins/preview/monkey.png
+    - assets/images/skins/preview/panda.png
+    - assets/images/skins/preview/pingvin.png
+    - assets/images/skins/preview/mag.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

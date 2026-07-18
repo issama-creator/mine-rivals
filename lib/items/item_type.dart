@@ -89,7 +89,7 @@ extension ItemTypeX on ItemType {
       case ItemType.legendary:
         return const Color(0xFFFF8F00);
       case ItemType.bomb:
-        return const Color(0xFF212121);
+        return const Color(0xFFFF1744);
     }
   }
 }

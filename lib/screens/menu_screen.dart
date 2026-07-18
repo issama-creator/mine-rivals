@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../game/mine_rivals_game.dart';
+import '../game/player_skins.dart';
 import '../systems/game_settings.dart';
+import '../ui/game_loading_screen.dart';
 import '../ui/hud_overlay.dart';
 import '../ui/results_overlay.dart';
 
@@ -62,6 +64,18 @@ class _MenuScreenState extends State<MenuScreen>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => const _SettingsSheet(),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _openSkins() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => const _SkinPickerSheet(),
     ).then((_) {
       if (mounted) setState(() {});
     });
@@ -224,12 +238,29 @@ class _MenuScreenState extends State<MenuScreen>
                           ),
                           const SizedBox(height: 12),
                           _MenuButton(
+                            label: 'ГЕРОЙ',
+                            icon: Icons.person_rounded,
+                            filled: false,
+                            onTap: _openSkins,
+                          ),
+                          const SizedBox(height: 12),
+                          _MenuButton(
                             label: 'НАСТРОЙКИ',
                             icon: Icons.tune_rounded,
                             filled: false,
                             onTap: _openSettings,
                           ),
-                          const SizedBox(height: 18),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Сейчас: ${PlayerSkins.byId(GameSettings.instance.selectedSkinId).nameRu}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: const Color(0xFFFFE082).withValues(alpha: 0.75),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
                           Text(
                             'Лови цветные камни — не дай вору!',
                             textAlign: TextAlign.center,
@@ -503,6 +534,220 @@ class _SettingTile extends StatelessWidget {
   }
 }
 
+class _SkinPickerSheet extends StatefulWidget {
+  const _SkinPickerSheet();
+
+  @override
+  State<_SkinPickerSheet> createState() => _SkinPickerSheetState();
+}
+
+class _SkinPickerSheetState extends State<_SkinPickerSheet> {
+  late String _selected;
+  late final PageController _page;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = GameSettings.instance.selectedSkinId;
+    final idx = PlayerSkins.all.indexWhere((s) => s.id == _selected);
+    _page = PageController(viewportFraction: 0.72, initialPage: idx < 0 ? 0 : idx);
+  }
+
+  @override
+  void dispose() {
+    _page.dispose();
+    super.dispose();
+  }
+
+  void _pick(PlayerSkin skin) {
+    HapticFeedback.selectionClick();
+    setState(() => _selected = skin.id);
+    GameSettings.instance.selectedSkinId = skin.id;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final skin = PlayerSkins.byId(_selected);
+    final h = MediaQuery.sizeOf(context).height;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(28),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF3E2723), Color(0xFF1B120C)],
+          ),
+          border: Border.all(
+            color: const Color(0xFFFFB300).withValues(alpha: 0.55),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: h * 0.62,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Выбери героя',
+                    style: TextStyle(
+                      color: Color(0xFFFFE082),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 20,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    skin.nameRu,
+                    style: TextStyle(
+                      color: skin.accent,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: PageView.builder(
+                      controller: _page,
+                      itemCount: PlayerSkins.all.length,
+                      onPageChanged: (i) => _pick(PlayerSkins.all[i]),
+                      itemBuilder: (context, i) {
+                        final s = PlayerSkins.all[i];
+                        final on = s.id == _selected;
+                        final borderColor = on
+                            ? s.accent
+                            : s.accent.withValues(alpha: 0.35);
+                        return AnimatedScale(
+                          scale: on ? 1 : 0.9,
+                          duration: const Duration(milliseconds: 220),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(22),
+                                color: Colors.black.withValues(alpha: 0.35),
+                                border: Border.all(
+                                  color: borderColor,
+                                  width: on ? 2.4 : 1.4,
+                                ),
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(22),
+                                onTap: () {
+                                  _page.animateToPage(
+                                    i,
+                                    duration: const Duration(milliseconds: 280),
+                                    curve: Curves.easeOutCubic,
+                                  );
+                                  _pick(s);
+                                },
+                                child: Column(
+                                  children: [
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          12,
+                                          16,
+                                          12,
+                                          4,
+                                        ),
+                                        child: LayoutBuilder(
+                                          builder: (context, constraints) {
+                                            final side = constraints
+                                                .biggest
+                                                .shortestSide;
+                                            return Center(
+                                              child: SizedBox(
+                                                width: side,
+                                                height: side,
+                                                child: Image.asset(
+                                                  s.previewAsset,
+                                                  fit: BoxFit.contain,
+                                                  alignment: Alignment.center,
+                                                  filterQuality:
+                                                      FilterQuality.high,
+                                                  errorBuilder:
+                                                      (_, __, ___) => Icon(
+                                                    Icons.person_rounded,
+                                                    size: 96,
+                                                    color: s.accent
+                                                        .withValues(alpha: 0.7),
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 14),
+                                      child: Text(
+                                        s.nameRu,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: on
+                                              ? s.accent
+                                              : Colors.white70,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 15,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFB300),
+                        foregroundColor: const Color(0xFF3E2723),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const Text(
+                        'Выбрать',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
 
@@ -522,8 +767,10 @@ class _GameScreenState extends State<GameScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF1A120B),
       body: GameWidget(
         game: game,
+        loadingBuilder: (_) => const GameLoadingScreen(),
         overlayBuilderMap: {
           'hud': (context, MineRivalsGame g) => HudOverlay(game: g),
           'results': (context, MineRivalsGame g) => ResultsOverlay(game: g),

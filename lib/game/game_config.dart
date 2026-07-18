@@ -1,19 +1,34 @@
 /// Tunable balance + world constants for Mine Rivals.
 class GameConfig {
-  /// 4 biomes × 800 m = 3200 m run; theme swaps every corridor.
-  static const double corridorSegmentMeters = 800;
-  static const int corridorCount = 4;
+  /// 10 corridors × 700 m = 7000 m run; theme swaps every shaft.
+  static const double corridorSegmentMeters = 700;
+  static const int corridorCount = 10;
   static const double levelLengthMeters =
       corridorSegmentMeters * corridorCount;
 
-  /// Pace ramps across the long run.
-  static const double runSpeedStart = 16;
-  static const double runSpeedEnd = 26;
+  /// Pace climbs each corridor (level) — clear bump shaft to shaft.
+  static const double runSpeedStart = 15;
+  static const double runSpeedPerCorridor = 1.55;
+  static const double runSpeedEnd = 31;
 
+  /// World run speed from overall progress (0..1).
   static double runSpeedAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
-    final eased = t * t;
-    return runSpeedStart + (runSpeedEnd - runSpeedStart) * eased;
+    // Corridor index 0..9 plus soft blend inside the shaft.
+    final corridorF = t * corridorCount;
+    final corridor = corridorF.floor().clamp(0, corridorCount - 1);
+    final within = (corridorF - corridor).clamp(0.0, 1.0);
+    final base = runSpeedStart + corridor * runSpeedPerCorridor;
+    final next = runSpeedStart +
+        (corridor + 1).clamp(0, corridorCount) * runSpeedPerCorridor;
+    final speed = base + (next - base) * within * 0.55;
+    return speed.clamp(runSpeedStart, runSpeedEnd);
+  }
+
+  /// How fast run-cycle anim plays vs base (matches world pace).
+  static double runAnimRateAt(double progress) {
+    final pace = runSpeedAt(progress);
+    return (pace / runSpeedStart).clamp(0.95, 2.05);
   }
 
   /// Spawn density grows gently toward the end.
@@ -25,7 +40,8 @@ class GameConfig {
   /// Start with a clear ~5 m gap; clean play caps around there.
   static const double startLeadDistance = 4.0;
   static const double maxLeadDistance = 5.0;
-  static const double minLeadDistance = -5.0;
+  /// Thief can pull up to ~10 m ahead on a long mistake streak (was 5).
+  static const double minLeadDistance = -10.0;
 
   /// Success — you pull ahead; streak makes the gap even bigger.
   static const double leadGainOnCatch = 0.8;
@@ -33,16 +49,20 @@ class GameConfig {
   static const double leadGainOnCombo = 1.5;
   /// Extra lead meters added for each catch in a success streak.
   static const double successStreakLeadBonus = 0.55;
-  /// Mistakes push thief away, but not unfair for kids.
-  static const double leadLossOnMiss = 1.5;
-  static const double leadLossOnMissRare = 3.0;
-  static const double leadLossOnBomb = 3.5;
-  static const double leadLossPerMistakeStreak = 1.2;
+  /// Mistakes add chase debt — thief closes gradually, not in one jump.
+  static const double leadLossOnMiss = 0.7;
+  static const double leadLossOnMissRare = 1.0;
+  static const double leadLossOnBomb = 1.1;
+  static const double leadLossPerMistakeStreak = 0.4;
+  /// How fast pending chase debt drains into real lead (m/s).
+  static const double leadDebtPerSec = 1.05;
+  /// Enough debt to push thief toward the full −10 m gap.
+  static const double leadDebtMax = 9.0;
   static const double leadRecoverPerSec = 0.1;
   /// How fast the thief eases when you pull ahead (goes back).
   static const double leadVisualFollow = 1.35;
-  /// How fast he eases when closing after your mistakes.
-  static const double leadVisualFollowMistake = 1.15;
+  /// How fast he eases when closing after your mistakes (slow approach).
+  static const double leadVisualFollowMistake = 0.72;
   /// Extra smoothing on thief screen Y (kills leftover hops).
   static const double thiefYSmooth = 4.2;
   static const double thiefScaleSmooth = 5.0;
@@ -78,11 +98,16 @@ class GameConfig {
   /// Last meters: slow-mo + finish beat.
   static const double finaleMeters = 40;
 
+  /// Falling loot sizes — jewels share one square so corridor crops look even.
+  static const double jewelDisplaySize = 48;
+  static const double lootDisplaySize = 38;
+  static const double bombDisplaySize = 34;
+
   static const double magnetRadius = 16;
   static const double magnetPullSpeed = 45;
   static const double catchRadius = 26;
-  /// Bombs need a near-touch — fair dodge room for kids.
-  static const double bombCatchRadius = 16;
+  /// Bombs: circular center-to-center touch only — near misses never explode.
+  static const double bombCatchRadius = 11;
 
   /// Three dodge lanes — always at least one clear row to slip through.
   static const int bombLaneCount = 3;
@@ -105,6 +130,8 @@ class GameConfig {
   /// Mild shrink when thief is deep ahead up the corridor.
   static const double thiefAheadScale = 0.72;
 
+  /// 1-based shaft: blue thief joins from this corridor onward (after 6).
+  static const int blueThiefFromCorridor = 7;
   static const double thiefLaneOffsetX = 44;
   static const double thiefPassExtraX = 58;
   static const double thiefMinClearanceX = 56;

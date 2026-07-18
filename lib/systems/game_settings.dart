@@ -5,4 +5,7 @@ class GameSettings {
 
   bool soundEnabled = true;
   bool shakeEnabled = true;
+
+  /// Selected miner skin id — see [PlayerSkins].
+  String selectedSkinId = 'player';
 }
