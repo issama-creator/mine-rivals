@@ -139,6 +139,30 @@ class ResultsOverlay extends StatelessWidget {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: OutlinedButton(
+                          onPressed: () => game.onQuitToMenu?.call(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFFFE082),
+                            side: BorderSide(
+                              color: const Color(0xFFFFB300).withValues(alpha: 0.5),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: const Text(
+                            'В МЕНЮ',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

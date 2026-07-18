@@ -12,6 +12,17 @@ import 'item_type.dart';
 
 enum ItemMagnet { none, player, thief }
 
+double _displaySizeFor(ItemType type) {
+  if (type.isJewel) {
+    return type == ItemType.legendary
+        ? GameConfig.jewelDisplaySize * 1.12
+        : GameConfig.jewelDisplaySize;
+  }
+  if (type.isBomb) return GameConfig.bombDisplaySize;
+  if (type.isWeb) return GameConfig.webDisplaySize;
+  return GameConfig.lootDisplaySize;
+}
+
 class FallingItem extends SpriteComponent with CollisionCallbacks {
   FallingItem({
     required this.type,
@@ -19,22 +30,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     required this.fallSpeed,
   }) : super(
           position: position,
-          size: Vector2(
-            type.isJewel
-                ? (type == ItemType.legendary
-                    ? GameConfig.jewelDisplaySize * 1.12
-                    : GameConfig.jewelDisplaySize)
-                : type.isBomb
-                    ? GameConfig.bombDisplaySize
-                    : GameConfig.lootDisplaySize,
-            type.isJewel
-                ? (type == ItemType.legendary
-                    ? GameConfig.jewelDisplaySize * 1.12
-                    : GameConfig.jewelDisplaySize)
-                : type.isBomb
-                    ? GameConfig.bombDisplaySize
-                    : GameConfig.lootDisplaySize,
-          ),
+          size: Vector2.all(_displaySizeFor(type)),
           anchor: Anchor.center,
           priority: 30,
         );
@@ -147,8 +143,8 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     PositionComponent other,
   ) {
     super.onCollisionStart(intersectionPoints, other);
-    // Bombs use the tight distance gate in the game loop — not fat hitboxes.
-    if (type.isBomb) return;
+    // Hazards (bomb/web) use the tight distance gate — not fat hitboxes.
+    if (type.isHazard) return;
     // Only the player basket collects via collision — thief has no hitbox.
     final owner = other is PlayerComponent ? other : other.parent;
     if (owner is PlayerComponent) {
@@ -187,6 +183,11 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
       );
     }
 
+    if (type.isWeb) {
+      _renderWeb(canvas);
+      return;
+    }
+
     if (type.isBomb) {
       final warn = 0.5 + 0.5 * sin(_pulse * 1.55);
       final c = Offset(size.x / 2, size.y / 2);
@@ -221,5 +222,65 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
       return;
     }
     super.render(canvas);
+  }
+
+  /// Procedural sticky spider web — no sprite asset needed.
+  void _renderWeb(Canvas canvas) {
+    final c = Offset(size.x / 2, size.y / 2);
+    final r = size.x * 0.48;
+    final breath = 0.85 + 0.15 * sin(_pulse * 0.9);
+
+    // Soft sticky halo.
+    canvas.drawCircle(
+      c,
+      r * breath,
+      Paint()..color = Colors.white.withValues(alpha: 0.08),
+    );
+
+    const spokes = 8;
+    final strand = Paint()
+      ..color = Colors.white.withValues(alpha: 0.82)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..strokeCap = StrokeCap.round;
+    final strandSoft = Paint()
+      ..color = Colors.white.withValues(alpha: 0.42)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    // Radial spokes.
+    for (var i = 0; i < spokes; i++) {
+      final a = (i / spokes) * pi * 2;
+      final p = Offset(c.dx + cos(a) * r, c.dy + sin(a) * r);
+      canvas.drawLine(c, p, strand);
+    }
+
+    // Concentric rings connecting the spokes.
+    for (final ring in const [0.32, 0.62, 0.92]) {
+      final rr = r * ring * breath;
+      final path = Path();
+      for (var i = 0; i <= spokes; i++) {
+        final a = (i / spokes) * pi * 2;
+        final p = Offset(c.dx + cos(a) * rr, c.dy + sin(a) * rr);
+        if (i == 0) {
+          path.moveTo(p.dx, p.dy);
+        } else {
+          // Slight inward sag between spokes for a woven look.
+          final aPrev = ((i - 1) / spokes) * pi * 2;
+          final mid = (a + aPrev) / 2;
+          final sag = rr * 0.82;
+          final cp = Offset(c.dx + cos(mid) * sag, c.dy + sin(mid) * sag);
+          path.quadraticBezierTo(cp.dx, cp.dy, p.dx, p.dy);
+        }
+      }
+      canvas.drawPath(path, strandSoft);
+    }
+
+    // Center knot.
+    canvas.drawCircle(
+      c,
+      2.2,
+      Paint()..color = Colors.white.withValues(alpha: 0.9),
+    );
   }
 }

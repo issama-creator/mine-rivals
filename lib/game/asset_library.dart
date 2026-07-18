@@ -19,6 +19,7 @@ class AssetLibrary {
   static SpriteAnimation? minerRun;
   static SpriteAnimation? thiefRun;
   static SpriteAnimation? thiefRunBlue;
+
   /// All playable skins keyed by [PlayerSkin.id].
   static final Map<String, SpriteAnimation> skinRuns = {};
 
@@ -40,6 +41,7 @@ class AssetLibrary {
     'Шахта 10',
   ];
   static final Map<ItemType, Sprite> items = {};
+
   /// Per corridor: 3 gem sprites [0]=diamond, [1]=ruby, [2]=emerald.
   static final List<List<Sprite>> corridorJewels = [];
   static const int _assetVersion = 19;
@@ -93,8 +95,9 @@ class AssetLibrary {
     minerRun = minerRunForSelected();
 
     final thiefImg = await Flame.images.load('assets/images/vors/vor1.png');
-    final thiefBlueImg =
-        await Flame.images.load('assets/images/vors/vor-blue.png');
+    final thiefBlueImg = await Flame.images.load(
+      'assets/images/vors/vor-blue.png',
+    );
     final elementsImg = await _loadBlackKeyed('assets/elements.png');
     final corridorPaths = [
       for (var i = 1; i <= GameConfig.corridorCount; i++)

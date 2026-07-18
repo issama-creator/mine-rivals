@@ -9,6 +9,7 @@ enum ItemType {
   amethyst,
   legendary,
   bomb,
+  web,
 }
 
 extension ItemTypeX on ItemType {
@@ -23,7 +24,12 @@ extension ItemTypeX on ItemType {
 
   bool get isBomb => this == ItemType.bomb;
 
-  /// Explicit jewel set — gold/coal/bomb are NEVER in here.
+  bool get isWeb => this == ItemType.web;
+
+  /// Hazards use a strict circular touch gate (no fat hitbox).
+  bool get isHazard => this == ItemType.bomb || this == ItemType.web;
+
+  /// Explicit jewel set — gold/coal/bomb/web are NEVER in here.
   bool get isJewel {
     switch (this) {
       case ItemType.diamond:
@@ -35,6 +41,7 @@ extension ItemTypeX on ItemType {
       case ItemType.gold:
       case ItemType.coal:
       case ItemType.bomb:
+      case ItemType.web:
         return false;
     }
   }
@@ -60,6 +67,8 @@ extension ItemTypeX on ItemType {
         return 'Legendary';
       case ItemType.bomb:
         return 'Bomb';
+      case ItemType.web:
+        return 'Web';
     }
   }
 
@@ -67,6 +76,8 @@ extension ItemTypeX on ItemType {
     switch (this) {
       case ItemType.bomb:
         return '−1';
+      case ItemType.web:
+        return 'Липко!';
       default:
         return '+1';
     }
@@ -90,6 +101,8 @@ extension ItemTypeX on ItemType {
         return const Color(0xFFFF8F00);
       case ItemType.bomb:
         return const Color(0xFFFF1744);
+      case ItemType.web:
+        return const Color(0xFFECEFF1);
     }
   }
 }

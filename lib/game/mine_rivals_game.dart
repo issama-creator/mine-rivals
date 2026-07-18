@@ -26,9 +26,10 @@ import 'game_config.dart';
 
 class MineRivalsGame extends FlameGame
     with HasCollisionDetection, DragCallbacks, TapCallbacks {
-  MineRivalsGame({this.onFinished});
+  MineRivalsGame({this.onFinished, this.onQuitToMenu});
 
   final void Function(MatchStats stats)? onFinished;
+  final VoidCallback? onQuitToMenu;
 
   final LeadSystem lead = LeadSystem();
   final MatchStats stats = MatchStats();
@@ -52,6 +53,10 @@ class MineRivalsGame extends FlameGame
   int mistakeStreak = 0;
   /// Lead meters still draining after mistakes (thief approaches over time).
   double _leadDebt = 0;
+  /// Time left stuck in a spider web (player sluggish, thief gains).
+  double _webSnareTimer = 0;
+
+  bool get isWebSnared => _webSnareTimer > 0;
   /// Consecutive clean catches — you pull further ahead of the thief.
   int successStreak = 0;
   Vector2 shakeOffset = Vector2.zero();
@@ -219,7 +224,13 @@ class MineRivalsGame extends FlameGame
 
     if (finished) return;
 
-    final targetRate = inFinale ? 0.62 : 1.0;
+    if (_webSnareTimer > 0) _webSnareTimer -= dt;
+
+    var targetRate = inFinale ? 0.62 : 1.0;
+    // Fresh web touch briefly drags the whole scene for a sticky beat.
+    if (_webSnareTimer > GameConfig.webSnareDuration * 0.55) {
+      targetRate = min(targetRate, GameConfig.webSnarePlayRate);
+    }
     _playRate += (targetRate - _playRate) * (1 - (1 / (1 + 6 * dt)));
     final step = dt * _playRate;
     final pace = GameConfig.runSpeedAt(progress);
@@ -254,7 +265,15 @@ class MineRivalsGame extends FlameGame
     final minX = 70.0;
     final maxX = size.x - 70.0;
     final desiredX = dragX ?? player.position.x;
-    player.moveToward(desiredX + shakeOffset.x, minX, maxX, step);
+    // Spider web makes the miner sticky/slow to steer.
+    final moveFactor =
+        _webSnareTimer > 0 ? GameConfig.webSnareMoveFactor : 1.0;
+    player.moveToward(
+      desiredX + shakeOffset.x,
+      minX,
+      maxX,
+      step * moveFactor,
+    );
     final closeBehind = lead.playerLeads && lead.leadDistance.abs() < 2.2;
     final sprinting = lead.isOvertaking && lead.sprintOvertake;
     for (final t in _pack) {
@@ -329,13 +348,16 @@ class MineRivalsGame extends FlameGame
     for (final item in children.whereType<FallingItem>().toList()) {
       if (item.collected || item.stolen) continue;
 
-      // Non-jewels (coin, bar, bomb): player only — thief always phases through.
+      // Non-jewels (coin, bar, bomb, web): player only — thief phases through.
       if (!item.type.isJewel) {
-        if (item.type.isBomb) {
+        if (item.type.isHazard) {
           item.setPlayerMagnet(false);
           // Strict circular touch vs basket — no AABB near-miss fakes.
           final dist = (basket - item.position).length;
-          if (dist <= GameConfig.bombCatchRadius) {
+          final radius = item.type.isBomb
+              ? GameConfig.bombCatchRadius
+              : GameConfig.webCatchRadius;
+          if (dist <= radius) {
             onItemCaught(item);
           }
         } else {
@@ -450,6 +472,22 @@ class MineRivalsGame extends FlameGame
       }
     }
 
+    // Spider web hazard — only from shaft 6 onward, one lane like a bomb.
+    final level = background.corridorIndex + 1;
+    if (!type.isBomb &&
+        level >= GameConfig.webFromCorridor &&
+        _rng.nextDouble() < GameConfig.webSpawnChance &&
+        !children.whereType<FallingItem>().any((e) => e.type.isWeb)) {
+      final lane = _rng.nextInt(GameConfig.bombLaneCount);
+      final item = pool.acquire(
+        type: ItemType.web,
+        position: Vector2(_laneX(lane), -40),
+        fallSpeed: background.speed,
+      );
+      add(item);
+      return;
+    }
+
     final x = _pickLootX();
     final item = pool.acquire(
       type: type,
@@ -528,7 +566,7 @@ class MineRivalsGame extends FlameGame
       final stuck = item.life > 7.5;
       if (!pastBottom && !pastFeet && !stuck) continue;
 
-      if (!item.type.isBomb && (pastFeet || pastBottom)) {
+      if (!item.type.isHazard && (pastFeet || pastBottom)) {
         // While trailing, jewels belong to the thief — don't punish a miss.
         if (item.type.isJewel && !lead.playerLeads) {
           _thiefSteal(item);
@@ -571,6 +609,24 @@ class MineRivalsGame extends FlameGame
       mistakeStreak <= 1 ? 'Вор догоняет…' : 'Вор всё ближе!',
       const Color(0xFFFF7043),
     );
+  }
+
+  /// Player ran into a spider web — sticky slow + the thief gains ground.
+  void _triggerWebSnare() {
+    _webSnareTimer = GameConfig.webSnareDuration;
+    cleanTimer = 0;
+    _leadDebt = (_leadDebt + GameConfig.leadLossOnWeb)
+        .clamp(0.0, GameConfig.leadDebtMax);
+    audio.play('miss');
+    _pulseBanner('Паутина! Вор догоняет', const Color(0xFFB0BEC5));
+    add(
+      ScreenFlash(
+        color: const Color(0xFFECEFF1),
+        peakAlpha: 0.14,
+        duration: 0.3,
+      ),
+    );
+    _shake(6);
   }
 
   void _updateLeadDebt(double dt) {
@@ -626,6 +682,24 @@ class MineRivalsGame extends FlameGame
             color: lostCrystal
                 ? const Color(0xFFFF5252)
                 : Colors.orangeAccent,
+          ),
+        );
+        pool.release(item);
+        return;
+      }
+
+      if (item.type.isWeb) {
+        _triggerWebSnare();
+        add(ParticleBurst(
+          position: item.position.clone(),
+          color: const Color(0xFFECEFF1),
+          count: 8,
+        ));
+        add(
+          FloatingText(
+            text: item.type.popupLabel,
+            position: item.position.clone(),
+            color: const Color(0xFFB0BEC5),
           ),
         );
         pool.release(item);
@@ -774,8 +848,31 @@ class MineRivalsGame extends FlameGame
     audio.play(win ? 'combo' : 'steal');
   }
 
+  /// Pause for in-run menu sheet.
+  void pauseForMenu() {
+    if (finished || _finishBeat) return;
+    pauseEngine();
+  }
+
+  void resumeFromMenu() {
+    if (finished || _finishBeat) return;
+    resumeEngine();
+  }
+
+  /// End the run early and show results (forfeit / quit from menu).
+  void endRunEarly() {
+    if (finished || _finishBeat) return;
+    finished = true;
+    _finishBeat = false;
+    _webSnareTimer = 0;
+    _playRate = 1;
+    pauseEngine();
+    overlays.add('results');
+  }
+
   void restart() {
     overlays.remove('results');
+    overlays.remove('pause');
     children.whereType<FallingItem>().toList().forEach((e) => e.removeFromParent());
     children.whereType<FloatingText>().toList().forEach((e) => e.removeFromParent());
     children.whereType<CorridorTitle>().toList().forEach((e) => e.removeFromParent());
@@ -818,6 +915,7 @@ class MineRivalsGame extends FlameGame
     cleanTimer = 0;
     mistakeStreak = 0;
     _leadDebt = 0;
+    _webSnareTimer = 0;
     successStreak = 0;
     _lastBombLane = -1;
     _bombCooldown = 0;

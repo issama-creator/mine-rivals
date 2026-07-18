@@ -61,13 +61,6 @@ class PlayerSkins {
       accent: Color(0xFFD17A3A), // warm brown fur
     ),
     PlayerSkin(
-      id: 'panda',
-      nameRu: 'Панда',
-      sheetAsset: 'assets/images/skins/panda.png',
-      previewAsset: 'assets/images/skins/preview/panda.png',
-      accent: Color(0xFF66BB6A), // green scarf
-    ),
-    PlayerSkin(
       id: 'pingvin',
       nameRu: 'Пингвин',
       sheetAsset: 'assets/images/skins/pingvin.png',

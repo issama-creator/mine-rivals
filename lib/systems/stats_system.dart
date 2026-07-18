@@ -35,6 +35,8 @@ class CollectorStats {
         legendary++;
       case ItemType.bomb:
         bombHits++;
+      case ItemType.web:
+        break;
     }
   }
 

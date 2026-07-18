@@ -60,7 +60,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/persnew.png
     - assets/elements.png
     - assets/tunnel.png
     - assets/audio/
@@ -74,7 +73,6 @@ flutter:
     - assets/images/skins/ninja.png
     - assets/images/skins/robot.png
     - assets/images/skins/monkey.png
-    - assets/images/skins/panda.png
     - assets/images/skins/pingvin.png
     - assets/images/skins/mag.png
     - assets/images/skins/preview/player.png
@@ -82,7 +80,6 @@ flutter:
     - assets/images/skins/preview/ninja.png
     - assets/images/skins/preview/robot.png
     - assets/images/skins/preview/monkey.png
-    - assets/images/skins/preview/panda.png
     - assets/images/skins/preview/pingvin.png
     - assets/images/skins/preview/mag.png
 

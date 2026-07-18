@@ -252,7 +252,7 @@ class _MenuScreenState extends State<MenuScreen>
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            'Сейчас: ${PlayerSkins.byId(GameSettings.instance.selectedSkinId).nameRu}',
+                            'Выбран: ${PlayerSkins.byId(GameSettings.instance.selectedSkinId).nameRu}',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: const Color(0xFFFFE082).withValues(alpha: 0.75),
@@ -761,7 +761,18 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
-    game = MineRivalsGame();
+    game = MineRivalsGame(
+      onQuitToMenu: () {
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const MenuScreen(),
+            transitionsBuilder: (_, animation, __, child) =>
+                FadeTransition(opacity: animation, child: child),
+          ),
+        );
+      },
+    );
   }
 
   @override

@@ -109,6 +109,23 @@ class GameConfig {
   /// Bombs: circular center-to-center touch only — near misses never explode.
   static const double bombCatchRadius = 11;
 
+  // ── Web (spider net) hazard ──────────────────────────────────────────────
+  static const double webDisplaySize = 42;
+  /// Strict touch like bombs — glancing pass doesn't snare.
+  static const double webCatchRadius = 13;
+  /// Web appears from this 1-based shaft onward.
+  static const int webFromCorridor = 6;
+  /// Chance a normal spawn beat becomes a web (once eligible).
+  static const double webSpawnChance = 0.10;
+  /// How long the player stays sticky/slow after touching a web.
+  static const double webSnareDuration = 1.15;
+  /// Player control sluggishness while snared (1 = normal, lower = slower).
+  static const double webSnareMoveFactor = 0.4;
+  /// Brief slow-mo tactile beat right after touching the web.
+  static const double webSnarePlayRate = 0.72;
+  /// Chase pressure the thief gains from a web (smaller than a bomb).
+  static const double leadLossOnWeb = 0.7;
+
   /// Three dodge lanes — always at least one clear row to slip through.
   static const int bombLaneCount = 3;
   /// Chance a bomb beat is a 2-lane gate (one free lane) instead of a single.
