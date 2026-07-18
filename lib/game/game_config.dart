@@ -99,6 +99,19 @@ class GameConfig {
   /// Slight boost over depth scale — keep the miner readable, not oversized.
   static const double playerHeroScale = 0.98;
 
+  /// Soft lane steer (velocity follow, not a hard snap).
+  static const double playerSteerSpeed = 13;
+  /// How quickly steer velocity eases toward the finger intent.
+  static const double playerSteerAccel = 8.5;
+  /// Max lateral speed (px/s) — keeps dodges readable.
+  static const double playerSteerMaxSpeed = 600;
+  /// Finger drag slightly longer than 1:1 for comfortable lane swaps.
+  static const double playerDragGain = 1.08;
+  /// Late run — a bit more bite without losing the smooth arc.
+  static const double playerSteerFinaleBoost = 1.06;
+  /// Body lean while strafing (radians at full speed).
+  static const double playerSteerLean = 0.08;
+
   /// Soft depth for the trailing thief only — hero never uses far shrink.
   static const double depthScaleNear = 1.0;
   static const double depthScaleFar = 0.72;
@@ -107,8 +120,20 @@ class GameConfig {
   static const double basketWidth = 58;
   static const double basketHeight = 32;
 
-  /// Last meters: slow-mo + finish beat.
-  static const double finaleMeters = 40;
+  /// Last meters: sprint denser loot + finish beat.
+  static const double finaleMeters = 100;
+  /// Spawn gaps shrink in the final sprint.
+  static const double finaleSpawnGapMult = 0.58;
+  /// Slight world rush (not slow-mo) for the last push.
+  static const double finalePlayRate = 1.08;
+
+  // ── Coin combo multiplier (Subway-style) ─────────────────────────────────
+  /// Unbroken gold streak for ×2.
+  static const int coinMult2At = 8;
+  /// Unbroken gold streak for ×3.
+  static const int coinMult3At = 16;
+  /// Trail sparks while streak is at least this.
+  static const int coinTrailFromStreak = 3;
 
   /// Falling loot sizes — jewels share one square so corridor crops look even.
   static const double jewelDisplaySize = 48;
@@ -143,6 +168,10 @@ class GameConfig {
   static const int webFromCorridor = 1;
   /// Chance a normal spawn beat becomes a web (once eligible). +10% traps.
   static const double webSpawnChance = 0.11;
+  /// Rare combo: double web → pit a few meters later (also gated by cooldown).
+  static const double webPitComboChance = 0.055;
+  static const double webPitComboCooldownMin = 22;
+  static const double webPitComboCooldownMax = 36;
   /// How long the player stays sticky/slow after touching a web.
   static const double webSnareDuration = 3.0;
   /// Player control sluggishness while snared (1 = normal, lower = slower).
@@ -155,19 +184,24 @@ class GameConfig {
   /// Three dodge lanes — always at least one clear row to slip through.
   static const int bombLaneCount = 3;
   /// Chance a bomb beat is a 2-lane gate (one free lane) instead of a single.
-  static const double bombDualChance = 0.48;
-  /// Min/max pause before the next bomb pattern (+10% trap density).
-  static const double bombCooldownMin = 1.2;
-  static const double bombCooldownMax = 2.35;
+  static const double bombDualChance = 0.55;
+  /// Min/max pause before the next bomb pattern — denser timing traps.
+  static const double bombCooldownMin = 0.95;
+  static const double bombCooldownMax = 1.85;
 
   // ── Pit (black hole) — instant fail ──────────────────────────────────────
   static const double pitDisplaySize = 52;
   /// Touch radius vs player feet / basket — forgiving edge, lethal center.
   static const double pitCatchRadius = 22;
   /// Pattern chance for a pit trap (also gated by cooldown in director).
-  static const double pitSpawnChance = 0.09;
-  static const double pitRespawnMin = 10;
-  static const double pitRespawnMax = 18;
+  static const double pitSpawnChance = 0.16;
+  static const double pitRespawnMin = 6.5;
+  static const double pitRespawnMax = 12;
+  /// Suck-into-pit cinematic length (seconds).
+  static const double pitSuckDuration = 0.78;
+
+  /// Opening beat — thief close on camera so the chase reads immediately.
+  static const double chaseIntroSec = 2.35;
 
   /// Walkable stone path inset from each screen edge (player steering).
   /// ~0.27 keeps the miner on the cobbles, out of wall mushrooms/ice.
@@ -183,6 +217,10 @@ class GameConfig {
 
   static const double thiefMagnetRadius = 118;
   static const double thiefMagnetPullSpeed = 240;
+  /// When thief leads — wider / faster jewel vacuum (revenge).
+  static const double thiefRevengeMagnetRadius = 168;
+  static const double thiefRevengeMagnetPullSpeed = 360;
+  static const double thiefRevengeStealDist = 30;
 
   /// Player always stays in the runner band — never vanishes up/back.
   /// Thief slides down when you lead, or up the corridor when he leads.
@@ -190,6 +228,14 @@ class GameConfig {
   static const double cameraThiefFarYFactor = 1.05;
   /// How high up the shaft the thief can go when crushing you.
   static const double cameraThiefAheadYFactor = 0.56;
+  /// At high run speed, ease the runner band down a bit so more path is visible.
+  /// Extra screen-height fraction (0.055 ≈ mild look-ahead, not a hard tilt).
+  static const double cameraSpeedDipMax = 0.055;
+  /// Pace ratio (vs start) where the dip begins / reaches full.
+  static const double cameraSpeedDipFrom = 1.12;
+  static const double cameraSpeedDipFull = 2.0;
+  /// How fast the camera eases into the speed dip.
+  static const double cameraSpeedDipFollow = 3.2;
   static const double leadCloseGapPx = 48;
   /// Mild shrink when thief is deep ahead up the corridor.
   static const double thiefAheadScale = 0.72;

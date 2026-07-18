@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/menu_screen.dart';
+import 'systems/progress_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +19,7 @@ Future<void> main() async {
       ),
     );
   }
+  await ProgressStore.instance.load();
   runApp(const MineRivalsApp());
 }
 

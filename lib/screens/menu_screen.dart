@@ -8,6 +8,7 @@ import '../game/asset_library.dart';
 import '../game/mine_rivals_game.dart';
 import '../game/player_skins.dart';
 import '../systems/game_settings.dart';
+import '../systems/progress_store.dart';
 import '../ui/game_loading_screen.dart';
 import '../ui/hud_overlay.dart';
 import '../ui/results_overlay.dart';
@@ -91,6 +92,18 @@ class _MenuScreenState extends State<MenuScreen>
     });
   }
 
+  void _openMissions() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => const _DailyMissionsSheet(),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final slide = CurvedAnimation(parent: _enter, curve: Curves.easeOutCubic);
@@ -151,18 +164,22 @@ class _MenuScreenState extends State<MenuScreen>
               padding: const EdgeInsets.fromLTRB(24, 18, 24, 28),
               child: Column(
                 children: [
-                  Align(
-                    alignment: Alignment.topRight,
-                    child: FadeTransition(
-                      opacity: fade,
-                      child: IconButton(
-                        onPressed: _openSettings,
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.black.withValues(alpha: 0.35),
-                          foregroundColor: const Color(0xFFFFE082),
+                  FadeTransition(
+                    opacity: fade,
+                    child: Row(
+                      children: [
+                        _MissionSticker(onTap: _openMissions),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: _openSettings,
+                          style: IconButton.styleFrom(
+                            backgroundColor:
+                                Colors.black.withValues(alpha: 0.35),
+                            foregroundColor: const Color(0xFFFFE082),
+                          ),
+                          icon: const Icon(Icons.settings_rounded),
                         ),
-                        icon: const Icon(Icons.settings_rounded),
-                      ),
+                      ],
                     ),
                   ),
                   const Spacer(flex: 2),
@@ -258,7 +275,7 @@ class _MenuScreenState extends State<MenuScreen>
                           ),
                           const SizedBox(height: 12),
                           _MenuButton(
-                            label: 'ГЕРОЙ',
+                            label: 'ПЕРСОНАЖИ',
                             icon: Icons.person_rounded,
                             filled: false,
                             onTap: _openSkins,
@@ -575,7 +592,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   title: 'Звук',
                   subtitle: 'Ловля, бомбы, смена лидера',
                   value: settings.soundEnabled,
-                  onChanged: (v) => setState(() => settings.soundEnabled = v),
+                  onChanged: (v) {
+                    setState(() => settings.soundEnabled = v);
+                    unawaited(ProgressStore.instance.saveSettings());
+                  },
                 ),
                 const SizedBox(height: 10),
                 _SettingTile(
@@ -583,7 +603,10 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   title: 'Тряска экрана',
                   subtitle: 'При попадании в бомбу',
                   value: settings.shakeEnabled,
-                  onChanged: (v) => setState(() => settings.shakeEnabled = v),
+                  onChanged: (v) {
+                    setState(() => settings.shakeEnabled = v);
+                    unawaited(ProgressStore.instance.saveSettings());
+                  },
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -689,12 +712,17 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
   }
 
   void _pick(PlayerSkin skin) {
+    if (!ProgressStore.instance.isSkinUnlocked(skin.id)) {
+      HapticFeedback.heavyImpact();
+      return;
+    }
     HapticFeedback.selectionClick();
     setState(() => _selected = skin.id);
-    GameSettings.instance.selectedSkinId = skin.id;
+    unawaited(ProgressStore.instance.selectSkin(skin.id));
     // Prefetch run sheet in background so Play doesn't hitch.
-    // ignore: discarded_futures
-    AssetLibrary.ensureLoaded().then((_) => AssetLibrary.ensureSkinLoaded(skin.id));
+    unawaited(
+      AssetLibrary.ensureLoaded().then((_) => AssetLibrary.ensureSkinLoaded(skin.id)),
+    );
   }
 
   @override
@@ -734,7 +762,7 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                   ),
                   const SizedBox(height: 14),
                   const Text(
-                    'Выбери героя',
+                    'Выбери персонажа',
                     style: TextStyle(
                       color: Color(0xFFFFE082),
                       fontWeight: FontWeight.w900,
@@ -743,11 +771,15 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    skin.nameRu,
+                    ProgressStore.instance.isSkinUnlocked(skin.id)
+                        ? skin.nameRu
+                        : '${skin.nameRu} · ${DailyMissions.unlockHint(skin.id)}',
                     style: TextStyle(
-                      color: skin.accent,
+                      color: ProgressStore.instance.isSkinUnlocked(skin.id)
+                          ? skin.accent
+                          : Colors.white54,
                       fontWeight: FontWeight.w700,
-                      fontSize: 16,
+                      fontSize: 15,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -755,13 +787,22 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                     child: PageView.builder(
                       controller: _page,
                       itemCount: PlayerSkins.all.length,
-                      onPageChanged: (i) => _pick(PlayerSkins.all[i]),
+                      onPageChanged: (i) {
+                        final s = PlayerSkins.all[i];
+                        if (ProgressStore.instance.isSkinUnlocked(s.id)) {
+                          _pick(s);
+                        } else {
+                          setState(() {});
+                        }
+                      },
                       itemBuilder: (context, i) {
                         final s = PlayerSkins.all[i];
+                        final unlocked =
+                            ProgressStore.instance.isSkinUnlocked(s.id);
                         final on = s.id == _selected;
-                        final borderColor = on
+                        final borderColor = on && unlocked
                             ? s.accent
-                            : s.accent.withValues(alpha: 0.35);
+                            : s.accent.withValues(alpha: unlocked ? 0.35 : 0.2);
                         return AnimatedScale(
                           scale: on ? 1 : 0.9,
                           duration: const Duration(milliseconds: 220),
@@ -786,59 +827,84 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                                   );
                                   _pick(s);
                                 },
-                                child: Column(
+                                child: Stack(
                                   children: [
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          12,
-                                          16,
-                                          12,
-                                          4,
-                                        ),
-                                        child: LayoutBuilder(
-                                          builder: (context, constraints) {
-                                            final side = constraints
-                                                .biggest
-                                                .shortestSide;
-                                            return Center(
-                                              child: SizedBox(
-                                                width: side,
-                                                height: side,
-                                                child: Image.asset(
-                                                  s.previewAsset,
-                                                  fit: BoxFit.contain,
-                                                  alignment: Alignment.center,
-                                                  filterQuality:
-                                                      FilterQuality.high,
-                                                  errorBuilder:
-                                                      (_, __, ___) => Icon(
-                                                    Icons.person_rounded,
-                                                    size: 96,
-                                                    color: s.accent
-                                                        .withValues(alpha: 0.7),
+                                    Column(
+                                      children: [
+                                        Expanded(
+                                          child: Padding(
+                                            padding: const EdgeInsets.fromLTRB(
+                                              12,
+                                              16,
+                                              12,
+                                              4,
+                                            ),
+                                            child: LayoutBuilder(
+                                              builder: (context, constraints) {
+                                                final side = constraints
+                                                    .biggest
+                                                    .shortestSide;
+                                                return Center(
+                                                  child: Opacity(
+                                                    opacity: unlocked ? 1 : 0.35,
+                                                    child: SizedBox(
+                                                      width: side,
+                                                      height: side,
+                                                      child: Image.asset(
+                                                        s.previewAsset,
+                                                        fit: BoxFit.contain,
+                                                        alignment:
+                                                            Alignment.center,
+                                                        filterQuality:
+                                                            FilterQuality.high,
+                                                        errorBuilder:
+                                                            (_, __, ___) => Icon(
+                                                          Icons.person_rounded,
+                                                          size: 96,
+                                                          color: s.accent
+                                                              .withValues(
+                                                            alpha: 0.7,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
-                                              ),
-                                            );
-                                          },
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(bottom: 14),
+                                          child: Text(
+                                            unlocked
+                                                ? s.nameRu
+                                                : DailyMissions.unlockHint(s.id),
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: unlocked
+                                                  ? (on
+                                                      ? s.accent
+                                                      : Colors.white70)
+                                                  : Colors.white54,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (!unlocked)
+                                      const Positioned(
+                                        top: 12,
+                                        right: 16,
+                                        child: Icon(
+                                          Icons.lock_rounded,
+                                          color: Color(0xFFFFE082),
+                                          size: 22,
                                         ),
                                       ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 14),
-                                      child: Text(
-                                        s.nameRu,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: on
-                                              ? s.accent
-                                              : Colors.white70,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                                    ),
                                   ],
                                 ),
                               ),
@@ -853,17 +919,23 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                     width: double.infinity,
                     height: 50,
                     child: FilledButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: ProgressStore.instance
+                              .isSkinUnlocked(_selected)
+                          ? () => Navigator.pop(context)
+                          : null,
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFFFFB300),
                         foregroundColor: const Color(0xFF3E2723),
+                        disabledBackgroundColor: Colors.white12,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
                       ),
-                      child: const Text(
-                        'Выбрать',
-                        style: TextStyle(
+                      child: Text(
+                        ProgressStore.instance.isSkinUnlocked(_selected)
+                            ? 'Выбрать'
+                            : 'Закрыто',
+                        style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 16,
                         ),
@@ -874,6 +946,271 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Top-left daily missions sticker with unread/remaining badge.
+class _MissionSticker extends StatelessWidget {
+  const _MissionSticker({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final missions = DailyMissions.forToday();
+    final store = ProgressStore.instance;
+    final left = missions.where((m) => !store.isDone(m.id)).length;
+    final allDone = left == 0;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: Colors.black.withValues(alpha: 0.4),
+            border: Border.all(
+              color: (allDone
+                      ? const Color(0xFF81C784)
+                      : const Color(0xFFFFB300))
+                  .withValues(alpha: 0.75),
+              width: 1.4,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  allDone ? Icons.check_rounded : Icons.flag_rounded,
+                  size: 20,
+                  color: allDone
+                      ? const Color(0xFF81C784)
+                      : const Color(0xFFFFE082),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Миссии',
+                  style: TextStyle(
+                    color: allDone
+                        ? const Color(0xFF81C784)
+                        : const Color(0xFFFFE082),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+                if (!allDone) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 18,
+                    height: 18,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE53935),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      '$left',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DailyMissionsSheet extends StatelessWidget {
+  const _DailyMissionsSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = ProgressStore.instance;
+    final missions = DailyMissions.forToday();
+    final doneCount = missions.where((m) => store.isDone(m.id)).length;
+    final streak = store.missionStreak;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(28),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF3E2723), Color(0xFF1B120C)],
+          ),
+          border: Border.all(
+            color: const Color(0xFFFFB300).withValues(alpha: 0.55),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Миссии на сегодня',
+                  style: TextStyle(
+                    color: Color(0xFFFFE082),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 20,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Серия: $streak дн. · $doneCount/${missions.length} сегодня',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.65),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '7 / 14 / 21… дней подряд → новые скины',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: const Color(0xFFFFB300).withValues(alpha: 0.75),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                for (final m in missions) ...[
+                  _MissionRow(mission: m),
+                  const SizedBox(height: 8),
+                ],
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFFFB300),
+                      foregroundColor: const Color(0xFF3E2723),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Понятно',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MissionRow extends StatelessWidget {
+  const _MissionRow({required this.mission});
+
+  final DailyMissionDef mission;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = ProgressStore.instance;
+    final done = store.isDone(mission.id);
+    final prog = store.progressOf(mission.id).clamp(0, mission.target);
+    final t = done ? 1.0 : prog / mission.target;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.black.withValues(alpha: 0.35),
+        border: Border.all(
+          color: done
+              ? const Color(0xFF81C784).withValues(alpha: 0.7)
+              : const Color(0xFFFFB300).withValues(alpha: 0.35),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Row(
+          children: [
+            Icon(
+              done ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+              color: done
+                  ? const Color(0xFF81C784)
+                  : const Color(0xFFFFE082).withValues(alpha: 0.55),
+              size: 24,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    mission.titleRu,
+                    style: TextStyle(
+                      color: done
+                          ? const Color(0xFF81C784)
+                          : const Color(0xFFFFE082),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                      decoration:
+                          done ? TextDecoration.lineThrough : null,
+                      decorationColor: const Color(0xFF81C784),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: t,
+                      minHeight: 5,
+                      backgroundColor: Colors.white12,
+                      color: done
+                          ? const Color(0xFF81C784)
+                          : const Color(0xFFFFB300),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    done ? 'Выполнено' : '$prog / ${mission.target}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

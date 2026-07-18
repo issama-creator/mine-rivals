@@ -18,6 +18,8 @@ class PlayerComponent extends SpriteAnimationComponent {
   double targetX = 0;
   double _displayScale = 1;
   double _animRate = 1;
+  /// Lateral velocity — makes left/right feel smooth and responsive.
+  double _steerVx = 0;
 
   Vector2 get basketWorldCenter {
     final local = Vector2(size.x * 0.5, size.y * 0.12);
@@ -26,6 +28,12 @@ class PlayerComponent extends SpriteAnimationComponent {
 
   void setRunAnimRate(double rate) {
     _animRate = rate.clamp(0.95, 3.0);
+  }
+
+  /// Clear lateral inertia (restart / pit suck).
+  void resetSteer() {
+    _steerVx = 0;
+    angle = 0;
   }
 
   @override
@@ -55,10 +63,50 @@ class PlayerComponent extends SpriteAnimationComponent {
     add(basketHitbox);
   }
 
-  void moveToward(double x, double minX, double maxX, double dt) {
+  /// Smooth velocity follow toward finger X — pleasant arc, still dodge-ready.
+  void moveToward(
+    double x,
+    double minX,
+    double maxX,
+    double dt, {
+    double speed = GameConfig.playerSteerSpeed,
+  }) {
     targetX = x.clamp(minX, maxX);
-    const speed = 18.0;
-    position.x += (targetX - position.x) * (1 - (1 / (1 + speed * dt)));
+    final err = targetX - position.x;
+    final gap = err.abs();
+
+    // Near target: settle gently. Far: a bit more intent for escapes.
+    final intent = speed * (gap > 48 ? 1.12 : (gap > 18 ? 0.98 : 0.72));
+    final desiredVx = err * intent;
+    final maxSp = GameConfig.playerSteerMaxSpeed *
+        (gap > 56 ? 1.05 : 1.0);
+
+    // Ease velocity — this is what makes strafes feel “nice”.
+    final blend =
+        1 - (1 / (1 + GameConfig.playerSteerAccel * dt));
+    _steerVx += (desiredVx - _steerVx) * blend;
+    _steerVx = _steerVx.clamp(-maxSp, maxSp);
+
+    position.x += _steerVx * dt;
+
+    // Soft edges — no bounce, kill speed into the wall.
+    if (position.x < minX) {
+      position.x = minX;
+      if (_steerVx < 0) _steerVx = 0;
+    } else if (position.x > maxX) {
+      position.x = maxX;
+      if (_steerVx > 0) _steerVx = 0;
+    }
+
+    // Micro-settle so he doesn't jitter on the finger.
+    if (gap < 2.0 && _steerVx.abs() < 18) {
+      position.x = targetX;
+      _steerVx *= 0.28;
+    }
+
+    // Light lean into the dodge — sells the left/right move.
+    final leanTarget = (_steerVx / maxSp) * GameConfig.playerSteerLean;
+    angle += (leanTarget - angle) * (1 - (1 / (1 + 7.5 * dt)));
   }
 
   void applyDepthScale(double scale, [double dt = 1 / 60]) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flame/events.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../effects/chase_arrow.dart';
 import '../effects/corridor_title.dart';
 import '../effects/floating_text.dart';
+import '../effects/gold_trail.dart';
 import '../effects/particle_burst.dart';
 import '../effects/screen_flash.dart';
 import '../effects/screen_shake.dart';
@@ -18,6 +20,7 @@ import '../player/player_component.dart';
 import '../systems/audio_manager.dart';
 import '../systems/game_settings.dart';
 import '../systems/lead_system.dart';
+import '../systems/progress_store.dart';
 import '../systems/stats_system.dart';
 import '../thief/thief_component.dart';
 import '../world/parallax_background.dart';
@@ -72,12 +75,29 @@ class MineRivalsGame extends FlameGame
 
   double get magnetPowerSeconds => _magnetPowerTimer;
 
-  /// Coin streak for catch pitch-up (+10 popup every 10).
+  /// Coin streak for catch pitch-up / ×2×3 mult / gold trail.
   int _goldStreak = 0;
+  int _lastCoinMult = 1;
+
+  int get goldStreak => _goldStreak;
+
+  /// Unbroken crystal catches — HUD combo (coins don't count / don't break).
+  int _jewelStreak = 0;
+
+  int get jewelStreak => _jewelStreak;
+
+  /// Subway-style coin multiplier from unbroken streak.
+  int get coinMultiplier {
+    if (_goldStreak >= GameConfig.coinMult3At) return 3;
+    if (_goldStreak >= GameConfig.coinMult2At) return 2;
+    return 1;
+  }
 
   /// Consecutive clean catches — you pull further ahead of the thief.
   int successStreak = 0;
   Vector2 shakeOffset = Vector2.zero();
+  /// Extra Y (px) when fast — lowers the “camera” for look-ahead.
+  double _cameraDipY = 0;
   bool finished = false;
   bool started = false;
   bool _finaleAnnounced = false;
@@ -108,6 +128,19 @@ class MineRivalsGame extends FlameGame
   /// Instant-fail (pit) — results screen shows restart, not jewel score win.
   bool failedRun = false;
 
+  List<DailyMissionDef> _dailyMissions = const [];
+  final Set<String> _missionToasted = {};
+  bool _dailyCommitted = false;
+
+  /// Opening chase reveal — thief close, then settles back.
+  double _introT = 0;
+  bool get inChaseIntro => _introT < GameConfig.chaseIntroSec;
+
+  /// Pit suck cinematic before results.
+  bool _pitSucking = false;
+  double _pitSuckT = 0;
+  Vector2? _pitSuckAt;
+
   double get playRate => _playRate;
 
   double get progress =>
@@ -135,6 +168,9 @@ class MineRivalsGame extends FlameGame
   Future<void> onLoad() async {
     // Assets + audio in parallel; loading overlay keeps animating.
     await Future.wait([AssetLibrary.ensureLoaded(), audio.init()]);
+    _dailyMissions = DailyMissions.forToday();
+    _missionToasted.clear();
+    _dailyCommitted = false;
 
     background = ParallaxBackground(size: size);
     await add(background);
@@ -145,6 +181,7 @@ class MineRivalsGame extends FlameGame
     await add(thief);
     await add(player);
     await add(chaseArrow);
+    await add(GoldTrail());
 
     lead.onOvertakeStarted = (leader) {
       final preferRight = player.position.x <= size.x * 0.5;
@@ -180,6 +217,12 @@ class MineRivalsGame extends FlameGame
     };
 
     _layoutActors();
+    _introT = 0;
+    // Start with thief almost on your heels so the chase is obvious.
+    lead.leadDistance = 0.85;
+    lead.visualLead = 0.85;
+    _layoutActors();
+    _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
     started = true;
   }
 
@@ -245,12 +288,18 @@ class MineRivalsGame extends FlameGame
       if (bannerTimer <= 0) bannerText = null;
     }
 
+    if (_pitSucking) {
+      _updatePitSuck(dt);
+      return;
+    }
+
     if (_finishBeat) {
       _finishBeatTimer -= dt;
       if (_finishBeatTimer <= 0) {
         _finishBeat = false;
         _playRate = 1;
         pauseEngine();
+        unawaited(_commitDailyProgress());
         onFinished?.call(stats);
         overlays.add('results');
       }
@@ -262,7 +311,7 @@ class MineRivalsGame extends FlameGame
     if (_webSnareTimer > 0) _webSnareTimer -= dt;
     if (_magnetPowerTimer > 0) _magnetPowerTimer -= dt;
 
-    var targetRate = inFinale ? 0.62 : 1.0;
+    var targetRate = inFinale ? GameConfig.finalePlayRate : 1.0;
     // Whole snare window: world slows so the thief visibly closes in.
     if (_webSnareTimer > 0) {
       targetRate = min(targetRate, GameConfig.webSnarePlayRate);
@@ -286,15 +335,40 @@ class MineRivalsGame extends FlameGame
 
     _updateLeadDebt(step);
     final playingClean = cleanTimer > 2.5 && _leadDebt <= 0;
-    lead.update(step, playingClean: playingClean);
+    lead.update(step, playingClean: playingClean && !inChaseIntro);
     cleanTimer += step;
 
+    // Chase intro: thief starts on your heels, then drifts to normal lead.
+    if (inChaseIntro) {
+      _introT += step;
+      final t = Curves.easeInOutCubic.transform(
+        (_introT / GameConfig.chaseIntroSec).clamp(0.0, 1.0),
+      );
+      final introLead = 0.85 + (GameConfig.startLeadDistance - 0.85) * t;
+      lead.leadDistance = introLead;
+      lead.visualLead = introLead;
+    }
+
     final depth = lead.depthPositions(screenHeight: size.y, dt: step);
-    // Straight run — no idle bob; only screen-shake offsets.
-    player.position.y = depth.playerY + shakeOffset.y * 0.35;
+    // Fast shafts: ease the band down a little so traps read earlier.
+    final paceRatio =
+        GameConfig.runSpeedAt(progress) / GameConfig.runSpeedStart;
+    final dipT = ((paceRatio - GameConfig.cameraSpeedDipFrom) /
+            (GameConfig.cameraSpeedDipFull - GameConfig.cameraSpeedDipFrom))
+        .clamp(0.0, 1.0);
+    final dipTarget =
+        size.y * GameConfig.cameraSpeedDipMax * Curves.easeInOut.transform(dipT);
+    final dipFollow =
+        1 - (1 / (1 + GameConfig.cameraSpeedDipFollow * step));
+    _cameraDipY += (dipTarget - _cameraDipY) * dipFollow;
+
+    // Straight run — no idle bob; only screen-shake + speed look-ahead.
+    player.position.y =
+        depth.playerY + _cameraDipY + shakeOffset.y * 0.35;
     player.applyDepthScale(depth.playerScale, step);
     for (final t in _pack) {
-      t.position.y = depth.thiefY + t.depthBias + shakeOffset.y * 0.2;
+      t.position.y =
+          depth.thiefY + t.depthBias + _cameraDipY + shakeOffset.y * 0.2;
       t.applyDepthScale(depth.thiefScale, step);
     }
 
@@ -303,7 +377,17 @@ class MineRivalsGame extends FlameGame
     final desiredX = dragX ?? player.position.x;
     // Spider web makes the miner sticky/slow to steer.
     final moveFactor = _webSnareTimer > 0 ? GameConfig.webSnareMoveFactor : 1.0;
-    player.moveToward(desiredX, minX, maxX, step * moveFactor);
+    // Finale / late shaft — snappier finger exits from dense trap lines.
+    final lateBoost = (inFinale || progress > 0.72)
+        ? GameConfig.playerSteerFinaleBoost
+        : 1.0;
+    player.moveToward(
+      desiredX,
+      minX,
+      maxX,
+      step * moveFactor,
+      speed: GameConfig.playerSteerSpeed * lateBoost,
+    );
     final closeBehind = lead.playerLeads && lead.leadDistance.abs() < 2.2;
     final sprinting = lead.isOvertaking && lead.sprintOvertake;
     for (final t in _pack) {
@@ -313,8 +397,9 @@ class MineRivalsGame extends FlameGame
         dt: step,
         overtaking: lead.isOvertaking,
         overtakeT: lead.overtakeT,
-        breathingDownNeck:
-            closeBehind || (!lead.playerLeads && lead.leadDistance.abs() < 2.2),
+        breathingDownNeck: inChaseIntro ||
+            closeBehind ||
+            (!lead.playerLeads && lead.leadDistance.abs() < 2.2),
         sprinting: sprinting && t.kind == ThiefKind.primary,
       );
     }
@@ -336,29 +421,82 @@ class MineRivalsGame extends FlameGame
       }
     }
 
-    spawns.update(step, progress: progress);
-    _spawnUpdate(step);
-    _magnetAndCatchUpdate(step);
-    _stealUpdate(step);
-    _missUpdate();
+    // No loot during the chase reveal — let the thief read first.
+    if (!inChaseIntro) {
+      spawns.update(step, progress: progress);
+      _spawnUpdate(step);
+      _magnetAndCatchUpdate(step);
+      _stealUpdate(step);
+      _missUpdate();
+      _pollDailyMissions();
+    }
 
     if (distance >= GameConfig.levelLengthMeters) {
       _beginFinishBeat();
     }
   }
 
+  void _pollDailyMissions() {
+    if (_dailyMissions.isEmpty || finished) return;
+    final just = ProgressStore.instance.peekJustCompleted(
+      distance: distance,
+      gold: stats.player.gold,
+      rares: stats.player.rareTotal,
+      missions: _dailyMissions,
+      alreadyToasted: _missionToasted,
+    );
+    for (final m in just) {
+      _missionToasted.add(m.id);
+      _pulseBanner('✓ ${m.titleRu}', const Color(0xFF81C784));
+      audio.play('combo');
+    }
+  }
+
+  Future<void> _commitDailyProgress() async {
+    if (_dailyCommitted) return;
+    _dailyCommitted = true;
+    final result = await ProgressStore.instance.applyRunProgress(
+      distance: distance,
+      gold: stats.player.gold,
+      rares: stats.player.rareTotal,
+      missions: _dailyMissions,
+    );
+    for (final m in _dailyMissions) {
+      if (result.missions.contains(m.titleRu) &&
+          !_missionToasted.contains(m.id)) {
+        _missionToasted.add(m.id);
+        _pulseBanner('✓ ${m.titleRu}', const Color(0xFF81C784));
+      }
+    }
+    for (final skinName in result.skins) {
+      _pulseBanner('Новый скин: $skinName!', const Color(0xFFFFD54F));
+      audio.play('rare');
+    }
+  }
+
   void _syncFinale() {
     if (!inFinale || _finaleAnnounced) return;
     _finaleAnnounced = true;
-    _pulseBanner('Финиш близко!', const Color(0xFFFFE082));
+    bannerText = 'ПОСЛЕДНИЙ СПУСК';
+    bannerColor = const Color(0xFFFFD54F);
+    bannerTimer = 2.6;
     add(
       FloatingText(
-        text: 'Почти финиш!',
-        position: Vector2(size.x / 2, size.y * 0.26),
-        color: const Color(0xFFFFE082),
-        fontSize: 28,
+        text: 'ПОСЛЕДНИЙ СПУСК',
+        position: Vector2(size.x / 2, size.y * 0.28),
+        color: const Color(0xFFFFD54F),
+        fontSize: 30,
       ),
     );
+    add(
+      ScreenFlash(
+        color: const Color(0xFFFFB300),
+        peakAlpha: 0.12,
+        duration: 0.4,
+      ),
+    );
+    // Bass hit — combo + overtake layered.
+    audio.play('combo');
     audio.play('overtake');
   }
 
@@ -366,6 +504,19 @@ class MineRivalsGame extends FlameGame
     bannerText = text;
     bannerColor = color;
     bannerTimer = 1.6;
+  }
+
+  void _breakCoinCombo() {
+    final had = coinMultiplier;
+    _goldStreak = 0;
+    _lastCoinMult = 1;
+    if (had > 1) {
+      _pulseBanner('Комбо сброшено', const Color(0xFFFFAB91));
+    }
+  }
+
+  void _breakJewelCombo() {
+    _jewelStreak = 0;
   }
 
   void _shake(double intensity) {
@@ -505,14 +656,23 @@ class MineRivalsGame extends FlameGame
       final stealPoint = nearest.position - Vector2(0, nearest.size.y * 0.72);
       final delta = stealPoint - item.position;
       final dist = delta.length;
+      final revenge = !lead.playerLeads;
+      final radius = revenge
+          ? GameConfig.thiefRevengeMagnetRadius
+          : GameConfig.thiefMagnetRadius;
+      final pullSp = revenge
+          ? GameConfig.thiefRevengeMagnetPullSpeed
+          : GameConfig.thiefMagnetPullSpeed;
+      final stealAt = revenge ? GameConfig.thiefRevengeStealDist : 22.0;
+
       final inRange =
-          dist < GameConfig.thiefMagnetRadius &&
-          item.position.y > nearest.position.y - nearest.size.y * 1.1 &&
-          item.position.y < nearest.position.y + 40;
+          dist < radius &&
+          item.position.y > nearest.position.y - nearest.size.y * 1.15 &&
+          item.position.y < nearest.position.y + 48;
 
       if (inRange) {
         item.setThiefMagnet(true);
-        final pull = min(GameConfig.thiefMagnetPullSpeed * dt, dist);
+        final pull = min(pullSp * dt, dist);
         if (dist > 0.001) {
           item.position += delta.normalized() * pull;
         }
@@ -520,7 +680,7 @@ class MineRivalsGame extends FlameGame
         item.setThiefMagnet(false);
       }
 
-      if (dist < 22) {
+      if (dist < stealAt) {
         _thiefSteal(item);
       }
     }
@@ -534,6 +694,9 @@ class MineRivalsGame extends FlameGame
 
     final beat = spawns.nextBeat(progress: progress);
     spawnTimer = spawns.gapFor(beat, progress: progress);
+    if (inFinale) {
+      spawnTimer *= GameConfig.finaleSpawnGapMult;
+    }
 
     // Empty corridor beat — teach “challenge incoming” before bomb gates.
     if (beat.silence) return;
@@ -564,10 +727,22 @@ class MineRivalsGame extends FlameGame
       return;
     }
 
-    // Spider web — rare interrupt (never replaces magnet / row / pit).
+    // Designed web beat (e.g. double-web → pit combo) — allow stacked webs.
+    if (beat.type.isWeb) {
+      final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
+      _spawnLiveItem(
+        type: ItemType.web,
+        position: Vector2(_laneX(lane), -40),
+        fallSpeed: background.speed,
+      );
+      return;
+    }
+
+    // Spider web — rare interrupt (never replaces magnet / row / pit / web).
     final level = background.corridorIndex + 1;
     if (!beat.type.isMagnet &&
         !beat.type.isPit &&
+        !beat.type.isWeb &&
         !beat.row &&
         level >= GameConfig.webFromCorridor &&
         _rng.nextDouble() < GameConfig.webSpawnChance &&
@@ -751,7 +926,7 @@ class MineRivalsGame extends FlameGame
           _thiefSteal(item);
           continue;
         }
-        _goldStreak = 0;
+        _breakCoinCombo();
         final nearMiss = (item.position.x - basket.x).abs() < 36;
         stats.player.registerMiss();
         cleanTimer = 0;
@@ -767,6 +942,7 @@ class MineRivalsGame extends FlameGame
           );
         }
         if (item.type.isJewel) {
+          _breakJewelCombo();
           _punishMistake(GameConfig.leadLossOnMissRare);
         } else {
           _punishMistake(GameConfig.leadLossOnMiss);
@@ -836,7 +1012,8 @@ class MineRivalsGame extends FlameGame
     if (!item.type.isJewel) {
       item.collected = true;
       if (item.type.isBomb) {
-        _goldStreak = 0;
+        _breakCoinCombo();
+        _breakJewelCombo();
         stats.player.registerCatch(isBomb: true);
         final lostCrystal = stats.player.loseOneRare();
         cleanTimer = 0;
@@ -865,7 +1042,8 @@ class MineRivalsGame extends FlameGame
       }
 
       if (item.type.isWeb) {
-        _goldStreak = 0;
+        _breakCoinCombo();
+        _breakJewelCombo();
         _triggerWebSnare();
         add(
           ParticleBurst(
@@ -886,8 +1064,9 @@ class MineRivalsGame extends FlameGame
       }
 
       if (item.type.isPit) {
+        final at = item.position.clone();
         _releaseLiveItem(item);
-        _failRunPit();
+        _failRunPit(at);
         return;
       }
 
@@ -914,37 +1093,49 @@ class MineRivalsGame extends FlameGame
         return;
       }
 
-      // Gold / coal = score only. Lead is jewels + not missing loot.
-      stats.player.addItem(item.type);
+      // Gold / coal = score only (+ combo mult). Lead is jewels / misses.
+      _goldStreak++;
+      final mult = coinMultiplier;
+      if (mult > _lastCoinMult) {
+        _lastCoinMult = mult;
+        _pulseBanner('×$mult', const Color(0xFFFFD54F));
+        audio.play('combo');
+      }
+      final base = item.type == ItemType.coal ? 2 : 1;
+      final gained = base * mult;
+      stats.player.addItem(item.type, amount: gained);
       stats.player.registerCatch(isBomb: false);
       mistakeStreak = 0;
 
-      final popup = _lootPopupFor(item.type);
-      if (item.type == ItemType.gold) {
-        _goldStreak++;
-        final pitch = 1.0 + min(0.48, (_goldStreak - 1) * 0.055);
-        audio.playCatchPitched(pitch);
-      } else {
-        audio.play('catch');
-      }
+      final pitch = 1.0 + min(0.48, (_goldStreak - 1) * 0.055);
+      audio.playCatchPitched(pitch);
 
+      final popup = mult > 1 ? '+$gained' : _lootPopupFor(item.type);
       add(
         ParticleBurst(
           position: item.position.clone(),
           color: item.type.color,
-          count: item.type == ItemType.gold ? 8 : 10,
+          count: 6 + mult * 3,
         ),
       );
       add(
         FloatingText(
           text: popup,
           position: item.position.clone(),
-          color: item.type == ItemType.gold
-              ? const Color(0xFFFFD54F)
-              : item.type.color,
-          fontSize: popup == '+10' ? 26 : 22,
+          color: mult >= 3 ? const Color(0xFFFF8F00) : const Color(0xFFFFD54F),
+          fontSize: mult > 1 ? 26 : 22,
         ),
       );
+      if (mult > 1) {
+        add(
+          FloatingText(
+            text: '×$mult',
+            position: item.position.clone() - Vector2(0, 26),
+            color: const Color(0xFFFFECB3),
+            fontSize: 16,
+          ),
+        );
+      }
       add(BasketSpark(position: player.basketWorldCenter.clone()));
       _releaseLiveItem(item);
       return;
@@ -965,20 +1156,32 @@ class MineRivalsGame extends FlameGame
 
     stats.player.addItem(item.type);
     stats.player.registerCatch(isBomb: false);
+    _jewelStreak++;
     _rewardSuccess(GameConfig.leadGainOnRare, showPullAway: true);
     audio.play('rare');
     add(BasketSpark(position: player.basketWorldCenter.clone()));
 
-    if (stats.player.currentStreak > 0 &&
-        stats.player.currentStreak % GameConfig.comboThreshold == 0) {
+    // Soft crystal-combo juice — readable, not a screen takeover.
+    if (_jewelStreak >= 2) {
+      add(
+        FloatingText(
+          text: '×$_jewelStreak',
+          position: item.position.clone() - Vector2(0, 30),
+          color: const Color(0xFFB3E5FC),
+          fontSize: _jewelStreak >= 5 ? 22 : 18,
+        ),
+      );
+    }
+    if (_jewelStreak > 0 &&
+        _jewelStreak % GameConfig.comboThreshold == 0) {
       _rewardSuccess(GameConfig.leadGainOnCombo, showPullAway: true);
       audio.play('combo');
       add(
         FloatingText(
-          text: '+10',
-          position: item.position.clone() - Vector2(0, 28),
-          color: const Color(0xFFFFD54F),
-          fontSize: 24,
+          text: 'Комбо $_jewelStreak',
+          position: item.position.clone() - Vector2(0, 48),
+          color: const Color(0xFF81D4FA),
+          fontSize: 20,
         ),
       );
     }
@@ -1012,31 +1215,57 @@ class MineRivalsGame extends FlameGame
     );
   }
 
-  /// Black pit — instant fail, restart from results.
-  void _failRunPit() {
-    if (finished || _finishBeat) return;
+  /// Black pit — suck-in cinematic, then results.
+  void _failRunPit(Vector2 pitAt) {
+    if (finished || _finishBeat || _pitSucking) return;
     failedRun = true;
-    finished = true;
+    _pitSucking = true;
+    _pitSuckT = 0;
+    _pitSuckAt = pitAt;
     _magnetPowerTimer = 0;
     _webSnareTimer = 0;
-    _playRate = 1;
+    _playRate = 0.35;
     _goldStreak = 0;
+    _jewelStreak = 0;
+    dragX = null;
+    player.resetSteer();
     audio.play('bomb');
-    _shake(22);
+    _shake(16);
     add(
-      ScreenFlash(
-        color: Colors.black,
-        peakAlpha: 0.55,
-        duration: 0.45,
-      ),
+      ScreenFlash(color: Colors.black, peakAlpha: 0.35, duration: 0.55),
     );
     _pulseBanner('Яма!', const Color(0xFFEF5350));
     for (final e in List<FallingItem>.of(liveItems)) {
       _releaseLiveItem(e);
     }
     liveItems.clear();
-    pauseEngine();
-    overlays.add('results');
+    unawaited(_commitDailyProgress());
+  }
+
+  void _updatePitSuck(double dt) {
+    _pitSuckT += dt;
+    final dur = GameConfig.pitSuckDuration;
+    final t = Curves.easeInCubic.transform((_pitSuckT / dur).clamp(0.0, 1.0));
+    final pit = _pitSuckAt ?? player.position;
+    // Pull toward the hole and shrink — “засос”.
+    player.position.x += (pit.x - player.position.x) * (1 - (1 / (1 + 14 * dt)));
+    player.position.y += (pit.y + 8 - player.position.y) * (0.08 + t * 0.55);
+    final s = (1.0 - t * 0.92).clamp(0.06, 1.0);
+    player.scale = Vector2.all(s);
+    player.angle = t * 1.15;
+    player.opacity = (1.0 - t * 0.85).clamp(0.0, 1.0);
+    background.scroll += background.speed * dt * 0.25;
+
+    if (_pitSuckT >= dur) {
+      _pitSucking = false;
+      finished = true;
+      _playRate = 1;
+      player.scale = Vector2.all(1);
+      player.angle = 0;
+      player.opacity = 1;
+      pauseEngine();
+      overlays.add('results');
+    }
   }
 
   /// +1 normally; every 10th gold in a streak pops +10 (Subway juice).
@@ -1054,29 +1283,35 @@ class MineRivalsGame extends FlameGame
     if (!item.type.isJewel) return;
     item.stolen = true;
     stats.thief.addItem(item.type);
+    _breakJewelCombo();
     audio.play('steal');
+    final revenge = !lead.playerLeads;
     add(
       ScreenFlash(
         color: const Color(0xFFEF5350),
-        peakAlpha: 0.14,
-        duration: 0.3,
+        peakAlpha: revenge ? 0.22 : 0.14,
+        duration: revenge ? 0.38 : 0.3,
       ),
     );
-    _shake(11);
+    _shake(revenge ? 14.0 : 11.0);
     add(
       ParticleBurst(
         position: item.position.clone(),
-        color: item.type.color,
-        count: 12,
+        color: const Color(0xFFFF1744),
+        count: revenge ? 16 : 12,
       ),
     );
     add(
       FloatingText(
-        text: '+1',
-        position: thief.position - Vector2(0, 50),
-        color: item.type.color,
+        text: revenge ? 'Украл!' : '+1',
+        position: item.position.clone(),
+        color: const Color(0xFFFF5252),
+        fontSize: revenge ? 24 : 22,
       ),
     );
+    if (revenge) {
+      _pulseBanner('Вор забирает!', const Color(0xFFEF5350));
+    }
     _releaseLiveItem(item);
   }
 
@@ -1140,7 +1375,9 @@ class MineRivalsGame extends FlameGame
     _webSnareTimer = 0;
     _magnetPowerTimer = 0;
     _goldStreak = 0;
+    _jewelStreak = 0;
     _playRate = 1;
+    unawaited(_commitDailyProgress());
     pauseEngine();
     overlays.add('results');
   }
@@ -1209,7 +1446,12 @@ class MineRivalsGame extends FlameGame
     _webSnareTimer = 0;
     _magnetPowerTimer = 0;
     _goldStreak = 0;
+    _lastCoinMult = 1;
+    _jewelStreak = 0;
     successStreak = 0;
+    _dailyMissions = DailyMissions.forToday();
+    _missionToasted.clear();
+    _dailyCommitted = false;
     _lastBombLane = -1;
     _bombCooldown = 0;
     _corridorDesired = -1;
@@ -1218,6 +1460,10 @@ class MineRivalsGame extends FlameGame
     _corridorGen = 0;
     finished = false;
     failedRun = false;
+    _pitSucking = false;
+    _pitSuckT = 0;
+    _pitSuckAt = null;
+    _introT = 0;
     _finaleAnnounced = false;
     _finishBeat = false;
     _finishBeatTimer = 0;
@@ -1225,13 +1471,22 @@ class MineRivalsGame extends FlameGame
     bannerTimer = 0;
     _playRate = 1;
     shakeOffset.setZero();
+    _cameraDipY = 0;
     dragX = null;
     chaseArrow.setActive(false);
     background.resetCorridors();
     AssetLibrary.applyCorridorJewels(0);
     pool.clearJewels();
     _clearExtraThieves();
+    player.scale = Vector2.all(1);
+    player.angle = 0;
+    player.opacity = 1;
+    player.resetSteer();
+    // Re-show chase intro so “вор за тобой” reads every run.
+    lead.leadDistance = 0.85;
+    lead.visualLead = 0.85;
     _layoutActors();
+    _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
     resumeEngine();
   }
 
@@ -1323,7 +1578,10 @@ class MineRivalsGame extends FlameGame
 
   @override
   void onDragUpdate(DragUpdateEvent event) {
-    dragX = ((dragX ?? player.position.x) + event.localDelta.x).clamp(
+    // Amplify finger travel so lane swaps in trap combos feel immediate.
+    final gain = GameConfig.playerDragGain *
+        ((inFinale || progress > 0.72) ? 1.06 : 1.0);
+    dragX = ((dragX ?? player.position.x) + event.localDelta.x * gain).clamp(
       _pathMinX,
       _pathMaxX,
     );

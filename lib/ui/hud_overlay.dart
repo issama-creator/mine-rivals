@@ -28,6 +28,8 @@ class _HudOverlayState extends State<HudOverlay> {
   int _lastThief = -1;
   int _lastRun = -1;
   int _lastGold = -1;
+  int _lastMult = -1;
+  int _lastJewelCombo = -1;
   int _lastShaft = -1;
   int _lastMagnetSec = -1;
   bool _lastYouLead = true;
@@ -44,6 +46,8 @@ class _HudOverlayState extends State<HudOverlay> {
       final thief = g.stats.thief.rareTotal;
       final run = g.distance.round();
       final gold = g.stats.player.gold;
+      final mult = g.coinMultiplier;
+      final jewelCombo = g.jewelStreak;
       final shaft = (g.distance / GameConfig.corridorSegmentMeters)
           .floor()
           .clamp(0, GameConfig.corridorCount - 1);
@@ -54,6 +58,8 @@ class _HudOverlayState extends State<HudOverlay> {
           thief == _lastThief &&
           run == _lastRun &&
           gold == _lastGold &&
+          mult == _lastMult &&
+          jewelCombo == _lastJewelCombo &&
           shaft == _lastShaft &&
           lead == _lastYouLead &&
           banner == _lastBanner &&
@@ -64,6 +70,8 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastThief = thief;
       _lastRun = run;
       _lastGold = gold;
+      _lastMult = mult;
+      _lastJewelCombo = jewelCombo;
       _lastShaft = shaft;
       _lastYouLead = lead;
       _lastBanner = banner;
@@ -196,7 +204,10 @@ class _HudOverlayState extends State<HudOverlay> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 IgnorePointer(
-                  child: _CoinChip(value: gold),
+                  child: _CoinChip(
+                    value: gold,
+                    multiplier: game.coinMultiplier,
+                  ),
                 ),
                 Expanded(
                   child: IgnorePointer(
@@ -298,12 +309,23 @@ class _HudOverlayState extends State<HudOverlay> {
             const SizedBox(height: 4),
             IgnorePointer(
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _CrystalScore(
-                    asset: _gemYou,
-                    value: playerRare,
-                    accent: const Color(0xFF4FC3F7),
-                    label: 'ты',
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _CrystalScore(
+                        asset: _gemYou,
+                        value: playerRare,
+                        accent: const Color(0xFF4FC3F7),
+                        label: 'ты',
+                      ),
+                      if (game.jewelStreak >= 2) ...[
+                        const SizedBox(height: 4),
+                        _JewelComboHint(streak: game.jewelStreak),
+                      ],
+                    ],
                   ),
                   const Spacer(),
                   _CrystalScore(
@@ -369,18 +391,21 @@ class _HudOverlayState extends State<HudOverlay> {
 }
 
 class _CoinChip extends StatelessWidget {
-  const _CoinChip({required this.value});
+  const _CoinChip({required this.value, this.multiplier = 1});
 
   final int value;
+  final int multiplier;
 
   @override
   Widget build(BuildContext context) {
+    final hot = multiplier > 1;
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         color: Colors.black.withValues(alpha: 0.4),
         border: Border.all(
-          color: const Color(0xFFFFC107).withValues(alpha: 0.55),
+          color: (hot ? const Color(0xFFFF8F00) : const Color(0xFFFFC107))
+              .withValues(alpha: hot ? 0.85 : 0.55),
         ),
       ),
       child: Padding(
@@ -408,6 +433,18 @@ class _CoinChip extends StatelessWidget {
                 height: 1,
               ),
             ),
+            if (hot) ...[
+              const SizedBox(width: 5),
+              Text(
+                '×$multiplier',
+                style: const TextStyle(
+                  color: Color(0xFFFF8F00),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14,
+                  height: 1,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -594,6 +631,47 @@ class _CrystalScore extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Soft crystal-combo read — edge of HUD, no frame, doesn't cover the path.
+class _JewelComboHint extends StatelessWidget {
+  const _JewelComboHint({required this.streak});
+
+  final int streak;
+
+  @override
+  Widget build(BuildContext context) {
+    final hot = streak >= 5;
+    final color = hot
+        ? const Color(0xFFE1F5FE)
+        : const Color(0xFF81D4FA);
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 160),
+      switchInCurve: Curves.easeOutCubic,
+      child: Text(
+        key: ValueKey(streak),
+        'комбо ×$streak',
+        style: TextStyle(
+          color: color.withValues(alpha: hot ? 0.92 : 0.78),
+          fontSize: hot ? 13 : 12,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.3,
+          height: 1,
+          shadows: [
+            Shadow(
+              color: Colors.black.withValues(alpha: 0.7),
+              blurRadius: 5,
+              offset: const Offset(0, 1),
+            ),
+            Shadow(
+              color: const Color(0xFF29B6F6).withValues(alpha: 0.28),
+              blurRadius: 8,
             ),
           ],
         ),

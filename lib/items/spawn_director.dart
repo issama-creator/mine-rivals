@@ -51,6 +51,7 @@ class SpawnDirector {
   int _patternCooldown = 0;
   double _magnetCooldown = 18;
   double _pitCooldown = 8;
+  double _webPitCooldown = 16;
   /// Lane the last coin trail trained the player into (for bait bombs).
   int _lastBaitLane = 1;
 
@@ -59,6 +60,7 @@ class SpawnDirector {
     _patternCooldown = 0;
     _magnetCooldown = 14 + _rng.nextDouble() * 10;
     _pitCooldown = 6 + _rng.nextDouble() * 6;
+    _webPitCooldown = 12 + _rng.nextDouble() * 10;
     _lastBaitLane = 1;
     _enqueueBreathing();
   }
@@ -66,6 +68,7 @@ class SpawnDirector {
   void update(double dt, {double progress = 0}) {
     _magnetCooldown = max(0, _magnetCooldown - dt);
     _pitCooldown = max(0, _pitCooldown - dt);
+    _webPitCooldown = max(0, _webPitCooldown - dt);
   }
 
   SpawnBeat nextBeat({required double progress}) {
@@ -106,6 +109,14 @@ class SpawnDirector {
       return;
     }
 
+    // Rare: two webs to snare, then a pit while sticky (~2–3 m later).
+    if (_webPitCooldown <= 0 &&
+        _pitCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.webPitComboChance) {
+      _enqueueWebPitCombo(progress);
+      return;
+    }
+
     // Black pits — rare but lethal.
     if (_pitCooldown <= 0 && _rng.nextDouble() < GameConfig.pitSpawnChance) {
       _enqueuePitTrap();
@@ -115,26 +126,31 @@ class SpawnDirector {
     final roll = _rng.nextDouble();
     final p = progress.clamp(0.0, 1.0);
 
-    // Trap bands ~+10% denser (bombs + pits eat more of the roll).
-    if (roll < 0.16 + p * 0.03) {
+    // Heavier trap mix — timing bombs + pits dominate mid/late run.
+    // Jewel pockets ~+20% vs prior weights.
+    if (roll < 0.12 + p * 0.02) {
       _coinColumn();
-    } else if (roll < 0.27 + p * 0.03) {
+    } else if (roll < 0.20 + p * 0.02) {
       _coinArc();
-    } else if (roll < 0.36) {
+    } else if (roll < 0.27) {
       _coinZigzag();
-    } else if (roll < 0.42) {
+    } else if (roll < 0.31) {
       _coinRow();
-    } else if (roll < 0.52 + p * 0.03) {
+    } else if (roll < 0.41 + p * 0.025) {
       _jewelPocket();
-    } else if (roll < 0.63 + p * 0.04) {
-      _laneBaitBomb();
-    } else if (roll < 0.72 + p * 0.04) {
+    } else if (roll < 0.50 + p * 0.03) {
+      _laneBaitBomb(); // coins → bomb same lane (tight)
+    } else if (roll < 0.58 + p * 0.03) {
       _switchGateBomb();
-    } else if (roll < 0.80 + p * 0.03) {
+    } else if (roll < 0.65 + p * 0.03) {
       _dodgePunishStagger();
-    } else if (roll < 0.87 + p * 0.03) {
+    } else if (roll < 0.73 + p * 0.02) {
       _jewelTrapBomb();
-    } else if (roll < 0.93) {
+    } else if (roll < 0.78 + p * 0.02) {
+      _timingSnapBomb(); // almost no telegraph — pure timing
+    } else if (roll < 0.84 + p * 0.02) {
+      _fakeSafeThenBomb(); // long hush, then snap bomb
+    } else if (roll < 0.90) {
       _bombGateWithSilence();
     } else if (roll < 0.97) {
       _enqueuePitTrap();
@@ -222,14 +238,48 @@ class SpawnDirector {
     _queue.add(SpawnBeat(type: ItemType.gold, lane: lane, gapMult: 0.7));
     _queue.add(SpawnBeat(type: ItemType.gold, lane: lane, gapMult: 0.65));
     _queue.add(SpawnBeat(type: _rollRare(), lane: lane, gapMult: 0.7));
-    if (_rng.nextBool()) {
+    // ~+20% denser pockets — side crystal more often, sometimes a third.
+    if (_rng.nextDouble() < 0.72) {
       final side = (lane + (_rng.nextBool() ? 1 : 2)) % 3;
       _queue.add(SpawnBeat(type: _rollRare(), lane: side, gapMult: 0.75));
+    }
+    if (_rng.nextDouble() < 0.28) {
+      _queue.add(SpawnBeat(type: _rollRare(), lane: lane, gapMult: 0.7));
     }
     _queue.add(SpawnBeat(type: ItemType.gold, lane: lane, gapMult: 0.85));
   }
 
-  /// Classic trap: train the lane with coins, then bomb THAT lane (short warn).
+  /// Survive bomb/pit → crystal reward in a clear lane (not every time).
+  void _maybeJewelAfterHazard({
+    required int lane,
+    double chance = 0.42,
+  }) {
+    if (_rng.nextDouble() >= chance) return;
+    final safe = lane.clamp(0, 2);
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.16 + _rng.nextDouble() * 0.1,
+      ),
+    );
+    _queue.add(
+      SpawnBeat(
+        type: _rollRare(),
+        lane: safe,
+        fixedGap: 0.2 + _rng.nextDouble() * 0.06,
+      ),
+    );
+    if (_rng.nextDouble() < 0.3) {
+      final side = (safe + 1 + _rng.nextInt(2)) % 3;
+      _queue.add(
+        SpawnBeat(type: _rollRare(), lane: side, gapMult: 0.72),
+      );
+    }
+    _lastBaitLane = safe;
+  }
+
+  /// Classic trap: train the lane with coins, then bomb THAT lane (tight timing).
   void _laneBaitBomb() {
     final lane = _rng.nextInt(3);
     _lastBaitLane = lane;
@@ -239,16 +289,16 @@ class SpawnDirector {
         SpawnBeat(
           type: ItemType.gold,
           lane: lane,
-          fixedGap: 0.17 + _rng.nextDouble() * 0.04,
+          fixedGap: 0.15 + _rng.nextDouble() * 0.03,
         ),
       );
     }
-    // Short hush — not a long telegraph.
+    // Very short hush — dodge window is tiny.
     _queue.add(
       SpawnBeat(
         type: ItemType.gold,
         silence: true,
-        fixedGap: 0.22 + _rng.nextDouble() * 0.12,
+        fixedGap: 0.12 + _rng.nextDouble() * 0.08,
       ),
     );
     _queue.add(
@@ -259,6 +309,61 @@ class SpawnDirector {
         bombLane: lane,
       ),
     );
+    // Reward dodge — crystal in a clear lane.
+    final reward = (lane + 1 + _rng.nextInt(2)) % 3;
+    _maybeJewelAfterHazard(lane: reward);
+    _patternCooldown = 1;
+  }
+
+  /// Coin in a lane → bomb almost immediately (reaction / timing check).
+  void _timingSnapBomb() {
+    final lane = _rng.nextInt(3);
+    _lastBaitLane = lane;
+    _queue.add(
+      SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.16),
+    );
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.08 + _rng.nextDouble() * 0.06,
+      ),
+    );
+    final free = (lane + 1 + _rng.nextInt(2)) % 3;
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        forceDual: _rng.nextDouble() < 0.4,
+        bombLane: lane,
+        bombFreeLane: free,
+      ),
+    );
+    _maybeJewelAfterHazard(lane: free);
+    _patternCooldown = 0;
+  }
+
+  /// Long empty beat so the player relaxes — then a sudden bomb/gate.
+  void _fakeSafeThenBomb() {
+    final lane = _lastBaitLane.clamp(0, 2);
+    final free = (lane + 1) % 3;
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.55 + _rng.nextDouble() * 0.25,
+      ),
+    );
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        forceDual: _rng.nextBool(),
+        bombLane: lane,
+        bombFreeLane: free,
+      ),
+    );
+    _maybeJewelAfterHazard(lane: free);
     _patternCooldown = 1;
   }
 
@@ -293,6 +398,7 @@ class SpawnDirector {
         bombFreeLane: free,
       ),
     );
+    _maybeJewelAfterHazard(lane: free);
     _patternCooldown = 1;
   }
 
@@ -321,6 +427,13 @@ class SpawnDirector {
         staggerBombLane: second,
       ),
     );
+    final clear = <int>[0, 1, 2]
+      ..remove(first)
+      ..remove(second);
+    _maybeJewelAfterHazard(
+      lane: clear.isNotEmpty ? clear.first : (first + 1) % 3,
+      chance: 0.36,
+    );
     _patternCooldown = 1;
   }
 
@@ -345,6 +458,7 @@ class SpawnDirector {
         bombLane: lane,
       ),
     );
+    _maybeJewelAfterHazard(lane: (lane + 1 + _rng.nextInt(2)) % 3);
     _patternCooldown = 1;
   }
 
@@ -359,17 +473,17 @@ class SpawnDirector {
     );
     // Often block the lane the player was just farming.
     final punish = _rng.nextDouble() < 0.55;
+    final free = (_lastBaitLane + 1 + _rng.nextInt(2)) % 3;
     _queue.add(
       SpawnBeat(
         type: ItemType.bomb,
         bombPattern: true,
         forceDual: _rng.nextDouble() < 0.55 ? true : null,
         bombLane: punish && _rng.nextBool() ? _lastBaitLane : null,
-        bombFreeLane: punish && _rng.nextBool()
-            ? (_lastBaitLane + 1 + _rng.nextInt(2)) % 3
-            : null,
+        bombFreeLane: punish && _rng.nextBool() ? free : null,
       ),
     );
+    _maybeJewelAfterHazard(lane: free);
     _patternCooldown = 1;
   }
 
@@ -389,28 +503,131 @@ class SpawnDirector {
     _patternCooldown = 1;
   }
 
-  /// Coins bait into a lane, then a black pit on that lane (instant fail).
+  /// Double web snare → black pit ~2–3 m later while the miner is sticky.
+  void _enqueueWebPitCombo(double progress) {
+    final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    _lastBaitLane = lane;
+
+    // Light coin bait into the trap lane.
+    if (_rng.nextDouble() < 0.6) {
+      final n = 2 + _rng.nextInt(2);
+      for (var i = 0; i < n; i++) {
+        _queue.add(
+          SpawnBeat(
+            type: ItemType.gold,
+            lane: lane,
+            fixedGap: 0.15,
+          ),
+        );
+      }
+    }
+
+    // Web #1, then a tight follow-up web (same lane, or neighbor to cover dodge).
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.web,
+        lane: lane,
+        fixedGap: 0.24,
+      ),
+    );
+    final side = _rng.nextBool() ? 1 : -1;
+    final lane2 = _rng.nextDouble() < 0.7
+        ? lane
+        : (lane + side).clamp(0, 2);
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.web,
+        lane: lane2,
+        fixedGap: 0.26 + _rng.nextDouble() * 0.06,
+      ),
+    );
+
+    // ~2–3 run meters of empty shaft, then pit on the snare lane.
+    final meters = 2.0 + _rng.nextDouble();
+    final pace = GameConfig.runSpeedAt(progress.clamp(0.0, 1.0));
+    final gapSec = (meters / (pace * GameConfig.distanceMeterRate))
+        .clamp(0.28, 0.62);
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: gapSec,
+      ),
+    );
+    _queue.add(SpawnBeat(type: ItemType.pit, lane: lane, gapMult: 1.0));
+    // Crystal just past the pit lane — reward for not falling in.
+    _maybeJewelAfterHazard(
+      lane: (lane + 1 + _rng.nextInt(2)) % 3,
+      chance: 0.48,
+    );
+
+    _webPitCooldown = GameConfig.webPitComboCooldownMin +
+        _rng.nextDouble() *
+            (GameConfig.webPitComboCooldownMax -
+                GameConfig.webPitComboCooldownMin);
+    _pitCooldown = GameConfig.pitRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
+    _patternCooldown = 2;
+  }
+
+  /// Coins bait into a lane, then a black pit (sometimes after a bomb dodge).
   void _enqueuePitTrap() {
     final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
     _lastBaitLane = lane;
-    final n = 2 + _rng.nextInt(2);
+    final n = 2 + _rng.nextInt(3);
     for (var i = 0; i < n; i++) {
       _queue.add(
         SpawnBeat(
           type: ItemType.gold,
           lane: lane,
-          fixedGap: 0.18,
+          fixedGap: 0.16,
         ),
       );
     }
-    _queue.add(
-      SpawnBeat(
-        type: ItemType.gold,
-        silence: true,
-        fixedGap: 0.2 + _rng.nextDouble() * 0.12,
-      ),
+    // Often: bomb first, then pit in the “safe” escape lane.
+    late final int pitLane;
+    if (_rng.nextDouble() < 0.55) {
+      final free = (lane + 1 + _rng.nextInt(2)) % 3;
+      pitLane = free;
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.gold,
+          silence: true,
+          fixedGap: 0.14 + _rng.nextDouble() * 0.08,
+        ),
+      );
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.bomb,
+          bombPattern: true,
+          forceDual: true,
+          bombFreeLane: free,
+        ),
+      );
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.gold,
+          silence: true,
+          fixedGap: 0.28 + _rng.nextDouble() * 0.12,
+        ),
+      );
+      _queue.add(SpawnBeat(type: ItemType.pit, lane: free, gapMult: 1.0));
+    } else {
+      pitLane = lane;
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.gold,
+          silence: true,
+          fixedGap: 0.14 + _rng.nextDouble() * 0.1,
+        ),
+      );
+      _queue.add(SpawnBeat(type: ItemType.pit, lane: lane, gapMult: 1.0));
+    }
+    _maybeJewelAfterHazard(
+      lane: (pitLane + 1 + _rng.nextInt(2)) % 3,
+      chance: 0.5,
     );
-    _queue.add(SpawnBeat(type: ItemType.pit, lane: lane, gapMult: 1.0));
     _pitCooldown = GameConfig.pitRespawnMin +
         _rng.nextDouble() *
             (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
@@ -425,6 +642,10 @@ class SpawnDirector {
       _rollRare(),
       ItemType.gold,
     ];
+    // Slightly richer sweep — second crystal sometimes (+20% feel).
+    if (_rng.nextDouble() < 0.35) {
+      types.insert(2, _rollRare());
+    }
     for (final t in types) {
       _queue.add(SpawnBeat(type: t, lane: lane, gapMult: 0.8));
       _lastBaitLane = lane;

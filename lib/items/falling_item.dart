@@ -183,8 +183,23 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     if (type.isJewel) {
       final pulse = 0.55 + 0.2 * sin(_pulse);
       final c = Offset(size.x / 2, size.y * 0.52);
-      _glowPaint.color = type.color.withValues(alpha: 0.18 + pulse * 0.12);
-      canvas.drawCircle(c, size.x * 0.48, _glowPaint);
+      final game = findGame();
+      final thiefThreat = game is MineRivalsGame &&
+          !game.lead.playerLeads &&
+          !game.hasMagnetPower;
+      if (thiefThreat || magnetBy == ItemMagnet.thief) {
+        // Revenge shimmer — jewel is about to be stolen.
+        final flash = 0.35 + 0.35 * sin(_pulse * 3.2);
+        _glowPaint.color =
+            const Color(0xFFFF1744).withValues(alpha: 0.22 + flash * 0.35);
+        canvas.drawCircle(c, size.x * (0.52 + flash * 0.08), _glowPaint);
+        _glowPaint.color =
+            const Color(0xFFFF8A80).withValues(alpha: 0.12 + flash * 0.2);
+        canvas.drawCircle(c, size.x * 0.38, _glowPaint);
+      } else {
+        _glowPaint.color = type.color.withValues(alpha: 0.18 + pulse * 0.12);
+        canvas.drawCircle(c, size.x * 0.48, _glowPaint);
+      }
     }
 
     if (type.isWeb) {

@@ -17,12 +17,17 @@ class CollectorStats {
 
   int get rareTotal => diamond + ruby + emerald + amethyst + legendary;
 
-  void addItem(ItemType type) {
+  void addGold(int amount) {
+    if (amount > 0) gold += amount;
+  }
+
+  void addItem(ItemType type, {int amount = 1}) {
+    final n = amount < 1 ? 1 : amount;
     switch (type) {
       case ItemType.gold:
-        gold++;
+        gold += n;
       case ItemType.coal:
-        coal++;
+        coal += n;
       case ItemType.diamond:
         diamond++;
       case ItemType.ruby:
