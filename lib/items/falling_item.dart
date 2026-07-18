@@ -21,6 +21,7 @@ double _displaySizeFor(ItemType type) {
   if (type.isBomb) return GameConfig.bombDisplaySize;
   if (type.isWeb) return GameConfig.webDisplaySize;
   if (type.isMagnet) return GameConfig.magnetDisplaySize;
+  if (type.isPit) return GameConfig.pitDisplaySize;
   return GameConfig.lootDisplaySize;
 }
 
@@ -92,7 +93,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
   static Sprite? _spriteForType(ItemType type) {
     final direct = AssetLibrary.items[type];
     if (direct != null) return direct;
-    if (type.isWeb || type.isMagnet) {
+    if (type.isWeb || type.isMagnet || type.isPit) {
       return AssetLibrary.items[ItemType.bomb] ??
           AssetLibrary.items[ItemType.gold];
     }
@@ -196,6 +197,11 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
       return;
     }
 
+    if (type.isPit) {
+      _renderPit(canvas);
+      return;
+    }
+
     if (type.isBomb) {
       final warn = 0.5 + 0.5 * sin(_pulse * 1.55);
       final c = Offset(size.x / 2, size.y / 2);
@@ -227,6 +233,33 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
       canvas.drawCircle(c, r * ring * breath, _webRing);
     }
     canvas.drawCircle(c, 2.0, _webHub);
+  }
+
+  /// Black sinkhole on the path — static oval, no pulse.
+  void _renderPit(Canvas canvas) {
+    final c = Offset(size.x / 2, size.y / 2);
+    final rx = size.x * 0.48;
+    final ry = size.y * 0.34;
+    final rim = Paint()
+      ..color = const Color(0xFF5D4037).withValues(alpha: 0.7)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+    final hole = Paint()
+      ..shader = RadialGradient(
+        colors: const [
+          Color(0xFF000000),
+          Color(0xFF1A1A1A),
+          Color(0xFF3E2723),
+        ],
+        stops: const [0.15, 0.55, 1],
+      ).createShader(Rect.fromCenter(center: c, width: rx * 2, height: ry * 2));
+    canvas.drawOval(Rect.fromCenter(center: c, width: rx * 2, height: ry * 2), hole);
+    canvas.drawOval(Rect.fromCenter(center: c, width: rx * 2, height: ry * 2), rim);
+    _glowPaint.color = Colors.black.withValues(alpha: 0.35);
+    canvas.drawOval(
+      Rect.fromCenter(center: c, width: rx * 1.35, height: ry * 1.35),
+      _glowPaint,
+    );
   }
 
   /// Simple horseshoe magnet — readable at loot size without a sheet crop.

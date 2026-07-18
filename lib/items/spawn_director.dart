@@ -50,6 +50,7 @@ class SpawnDirector {
   final Queue<SpawnBeat> _queue = Queue<SpawnBeat>();
   int _patternCooldown = 0;
   double _magnetCooldown = 18;
+  double _pitCooldown = 8;
   /// Lane the last coin trail trained the player into (for bait bombs).
   int _lastBaitLane = 1;
 
@@ -57,12 +58,14 @@ class SpawnDirector {
     _queue.clear();
     _patternCooldown = 0;
     _magnetCooldown = 14 + _rng.nextDouble() * 10;
+    _pitCooldown = 6 + _rng.nextDouble() * 6;
     _lastBaitLane = 1;
     _enqueueBreathing();
   }
 
   void update(double dt, {double progress = 0}) {
     _magnetCooldown = max(0, _magnetCooldown - dt);
+    _pitCooldown = max(0, _pitCooldown - dt);
   }
 
   SpawnBeat nextBeat({required double progress}) {
@@ -103,30 +106,38 @@ class SpawnDirector {
       return;
     }
 
+    // Black pits — rare but lethal.
+    if (_pitCooldown <= 0 && _rng.nextDouble() < GameConfig.pitSpawnChance) {
+      _enqueuePitTrap();
+      return;
+    }
+
     final roll = _rng.nextDouble();
     final p = progress.clamp(0.0, 1.0);
 
-    // Bomb-related bands ~+10% vs previous (~0.24 → ~0.265).
-    if (roll < 0.18 + p * 0.04) {
+    // Trap bands ~+10% denser (bombs + pits eat more of the roll).
+    if (roll < 0.16 + p * 0.03) {
       _coinColumn();
-    } else if (roll < 0.30 + p * 0.03) {
+    } else if (roll < 0.27 + p * 0.03) {
       _coinArc();
-    } else if (roll < 0.40) {
+    } else if (roll < 0.36) {
       _coinZigzag();
-    } else if (roll < 0.47) {
+    } else if (roll < 0.42) {
       _coinRow();
-    } else if (roll < 0.58 + p * 0.03) {
+    } else if (roll < 0.52 + p * 0.03) {
       _jewelPocket();
-    } else if (roll < 0.68 + p * 0.04) {
-      _laneBaitBomb(); // coins → bomb SAME lane
-    } else if (roll < 0.76 + p * 0.04) {
-      _switchGateBomb(); // coins → free lane is elsewhere
-    } else if (roll < 0.83 + p * 0.03) {
-      _dodgePunishStagger(); // bomb A, then bomb where you dodge
-    } else if (roll < 0.90 + p * 0.03) {
-      _jewelTrapBomb(); // crystal bait → bomb
-    } else if (roll < 0.96) {
+    } else if (roll < 0.63 + p * 0.04) {
+      _laneBaitBomb();
+    } else if (roll < 0.72 + p * 0.04) {
+      _switchGateBomb();
+    } else if (roll < 0.80 + p * 0.03) {
+      _dodgePunishStagger();
+    } else if (roll < 0.87 + p * 0.03) {
+      _jewelTrapBomb();
+    } else if (roll < 0.93) {
       _bombGateWithSilence();
+    } else if (roll < 0.97) {
+      _enqueuePitTrap();
     } else {
       _mixedSweep();
     }
@@ -375,6 +386,34 @@ class SpawnDirector {
     _magnetCooldown = GameConfig.magnetRespawnMin +
         _rng.nextDouble() *
             (GameConfig.magnetRespawnMax - GameConfig.magnetRespawnMin);
+    _patternCooldown = 1;
+  }
+
+  /// Coins bait into a lane, then a black pit on that lane (instant fail).
+  void _enqueuePitTrap() {
+    final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    _lastBaitLane = lane;
+    final n = 2 + _rng.nextInt(2);
+    for (var i = 0; i < n; i++) {
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.gold,
+          lane: lane,
+          fixedGap: 0.18,
+        ),
+      );
+    }
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.2 + _rng.nextDouble() * 0.12,
+      ),
+    );
+    _queue.add(SpawnBeat(type: ItemType.pit, lane: lane, gapMult: 1.0));
+    _pitCooldown = GameConfig.pitRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
     _patternCooldown = 1;
   }
 

@@ -11,6 +11,7 @@ enum ItemType {
   bomb,
   web,
   magnet,
+  pit,
 }
 
 extension ItemTypeX on ItemType {
@@ -29,10 +30,13 @@ extension ItemTypeX on ItemType {
 
   bool get isMagnet => this == ItemType.magnet;
 
-  /// Hazards use a strict circular touch gate (no fat hitbox).
-  bool get isHazard => this == ItemType.bomb || this == ItemType.web;
+  bool get isPit => this == ItemType.pit;
 
-  /// Pulled by the Subway-style magnet power-up (never bombs/webs).
+  /// Hazards use a strict circular touch gate (no fat hitbox).
+  bool get isHazard =>
+      this == ItemType.bomb || this == ItemType.web || this == ItemType.pit;
+
+  /// Pulled by the Subway-style magnet power-up (never hazards).
   bool get isMagnetizable => !isHazard;
 
   /// Explicit jewel set — commons / hazards / magnet are NEVER in here.
@@ -49,6 +53,7 @@ extension ItemTypeX on ItemType {
       case ItemType.bomb:
       case ItemType.web:
       case ItemType.magnet:
+      case ItemType.pit:
         return false;
     }
   }
@@ -78,6 +83,8 @@ extension ItemTypeX on ItemType {
         return 'Web';
       case ItemType.magnet:
         return 'Magnet';
+      case ItemType.pit:
+        return 'Pit';
     }
   }
 
@@ -89,6 +96,8 @@ extension ItemTypeX on ItemType {
         return 'Липко!';
       case ItemType.magnet:
         return 'Магнит!';
+      case ItemType.pit:
+        return 'Яма!';
       case ItemType.coal:
         return '+2';
       default:
@@ -118,6 +127,8 @@ extension ItemTypeX on ItemType {
         return const Color(0xFFECEFF1);
       case ItemType.magnet:
         return const Color(0xFF29B6F6);
+      case ItemType.pit:
+        return const Color(0xFF212121);
     }
   }
 }

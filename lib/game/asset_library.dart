@@ -333,6 +333,7 @@ class AssetLibrary {
     // Web/magnet drawn procedurally — placeholder only for Flame.
     items[ItemType.web] = bomb;
     items[ItemType.magnet] = coin;
+    items[ItemType.pit] = bomb;
   }
 
   static Future<ui.Image> _loadBlackKeyed(String path) async {

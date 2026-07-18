@@ -105,6 +105,9 @@ class MineRivalsGame extends FlameGame
   Color bannerColor = const Color(0xFFEF5350);
   double bannerTimer = 0;
 
+  /// Instant-fail (pit) — results screen shows restart, not jewel score win.
+  bool failedRun = false;
+
   double get playRate => _playRate;
 
   double get progress =>
@@ -381,12 +384,20 @@ class MineRivalsGame extends FlameGame
       // Hazards never magnetize — strict touch only.
       if (item.type.isHazard) {
         item.setPlayerMagnet(false);
-        final dist = (basket - item.position).length;
-        final radius = item.type.isBomb
-            ? GameConfig.bombCatchRadius
-            : GameConfig.webCatchRadius;
-        if (dist <= radius) {
-          onItemCaught(item);
+        if (item.type.isPit) {
+          // Pit checks feet on the path, not the basket.
+          final feet = Vector2(player.position.x, player.position.y - 10);
+          if ((feet - item.position).length <= GameConfig.pitCatchRadius) {
+            onItemCaught(item);
+          }
+        } else {
+          final dist = (basket - item.position).length;
+          final radius = item.type.isBomb
+              ? GameConfig.bombCatchRadius
+              : GameConfig.webCatchRadius;
+          if (dist <= radius) {
+            onItemCaught(item);
+          }
         }
         continue;
       }
@@ -542,9 +553,21 @@ class MineRivalsGame extends FlameGame
       return;
     }
 
-    // Spider web — rare interrupt (never replaces magnet / row).
+    // Pit beat — black hole on a lane.
+    if (beat.type.isPit) {
+      final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
+      _spawnLiveItem(
+        type: ItemType.pit,
+        position: Vector2(_laneX(lane), -48),
+        fallSpeed: background.speed,
+      );
+      return;
+    }
+
+    // Spider web — rare interrupt (never replaces magnet / row / pit).
     final level = background.corridorIndex + 1;
     if (!beat.type.isMagnet &&
+        !beat.type.isPit &&
         !beat.row &&
         level >= GameConfig.webFromCorridor &&
         _rng.nextDouble() < GameConfig.webSpawnChance &&
@@ -762,7 +785,7 @@ class MineRivalsGame extends FlameGame
     final add = (baseLoss + extra).clamp(0.0, 2.2);
     _leadDebt = (_leadDebt + add).clamp(0.0, GameConfig.leadDebtMax);
     _pulseBanner(
-      mistakeStreak <= 1 ? 'Вор догоняет…' : 'Вор всё ближе!',
+      mistakeStreak <= 1 ? 'Промах! Вор ближе' : 'Вор догоняет!',
       const Color(0xFFFF7043),
     );
   }
@@ -774,7 +797,7 @@ class MineRivalsGame extends FlameGame
     // Same chase pipeline as a bomb / miss so the thief actually gains.
     _punishMistake(GameConfig.leadLossOnWeb);
     audio.play('miss');
-    _pulseBanner('Паутина! Вор догоняет', const Color(0xFFB0BEC5));
+    _pulseBanner('Паутина!', const Color(0xFFB0BEC5));
     add(
       ScreenFlash(
         color: const Color(0xFFECEFF1),
@@ -862,6 +885,12 @@ class MineRivalsGame extends FlameGame
         return;
       }
 
+      if (item.type.isPit) {
+        _releaseLiveItem(item);
+        _failRunPit();
+        return;
+      }
+
       if (item.type.isMagnet) {
         _activateMagnetPower();
         add(
@@ -885,10 +914,10 @@ class MineRivalsGame extends FlameGame
         return;
       }
 
-      // Gold coin / gold bar (coal)
+      // Gold / coal = score only. Lead is jewels + not missing loot.
       stats.player.addItem(item.type);
       stats.player.registerCatch(isBomb: false);
-      _rewardSuccess(GameConfig.leadGainOnCatch);
+      mistakeStreak = 0;
 
       final popup = _lootPopupFor(item.type);
       if (item.type == ItemType.gold) {
@@ -981,6 +1010,33 @@ class MineRivalsGame extends FlameGame
         duration: 0.28,
       ),
     );
+  }
+
+  /// Black pit — instant fail, restart from results.
+  void _failRunPit() {
+    if (finished || _finishBeat) return;
+    failedRun = true;
+    finished = true;
+    _magnetPowerTimer = 0;
+    _webSnareTimer = 0;
+    _playRate = 1;
+    _goldStreak = 0;
+    audio.play('bomb');
+    _shake(22);
+    add(
+      ScreenFlash(
+        color: Colors.black,
+        peakAlpha: 0.55,
+        duration: 0.45,
+      ),
+    );
+    _pulseBanner('Яма!', const Color(0xFFEF5350));
+    for (final e in List<FallingItem>.of(liveItems)) {
+      _releaseLiveItem(e);
+    }
+    liveItems.clear();
+    pauseEngine();
+    overlays.add('results');
   }
 
   /// +1 normally; every 10th gold in a streak pops +10 (Subway juice).
@@ -1079,6 +1135,7 @@ class MineRivalsGame extends FlameGame
   void endRunEarly() {
     if (finished || _finishBeat) return;
     finished = true;
+    failedRun = false;
     _finishBeat = false;
     _webSnareTimer = 0;
     _magnetPowerTimer = 0;
@@ -1160,6 +1217,7 @@ class MineRivalsGame extends FlameGame
     _corridorFxAt = -1;
     _corridorGen = 0;
     finished = false;
+    failedRun = false;
     _finaleAnnounced = false;
     _finishBeat = false;
     _finishBeatTimer = 0;

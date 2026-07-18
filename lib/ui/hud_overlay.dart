@@ -316,17 +316,17 @@ class _HudOverlayState extends State<HudOverlay> {
               ),
             ),
             if (game.hasMagnetPower) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               IgnorePointer(
-                child: _banner(
+                child: _toast(
                   'Магнит ${game.magnetPowerSeconds.ceil()}с',
                   const Color(0xFF29B6F6),
                 ),
               ),
             ] else if (game.bannerText != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               IgnorePointer(
-                child: _banner(game.bannerText!, game.bannerColor),
+                child: _toast(game.bannerText!, game.bannerColor),
               ),
             ],
           ],
@@ -348,24 +348,21 @@ class _HudOverlayState extends State<HudOverlay> {
     return buf.toString();
   }
 
-  Widget _banner(String text, Color color) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: Colors.black.withValues(alpha: 0.45),
-        border: Border.all(color: color.withValues(alpha: 0.65)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.w900,
-            fontSize: 12,
-          ),
-        ),
+  /// Subway-style floating toast — text + shadow only, no pill frame.
+  Widget _toast(String text, Color color) {
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: color,
+        fontWeight: FontWeight.w900,
+        fontSize: 16,
+        letterSpacing: 0.2,
+        height: 1.1,
+        shadows: const [
+          Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 2)),
+          Shadow(color: Colors.black54, blurRadius: 2, offset: Offset(0, 1)),
+        ],
       ),
     );
   }

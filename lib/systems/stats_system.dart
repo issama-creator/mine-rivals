@@ -37,6 +37,7 @@ class CollectorStats {
         bombHits++;
       case ItemType.web:
       case ItemType.magnet:
+      case ItemType.pit:
         break;
     }
   }

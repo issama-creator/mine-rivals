@@ -10,9 +10,21 @@ class ResultsOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = game.stats;
-    final win = s.playerWins;
+    final failed = game.failedRun;
+    final win = !failed && s.playerWins;
     final you = s.player.rareTotal;
     final thief = s.thief.rareTotal;
+    final title = failed
+        ? 'УПАЛ В ЯМУ!'
+        : (win ? 'ТЫ ПОБЕДИЛ!' : 'ВОР ПОБЕДИЛ!');
+    final subtitle = failed
+        ? 'Чёрные пятна — мгновенный конец. Уворачивайся!'
+        : (win
+            ? 'У тебя больше красивых камней'
+            : 'Вор унёс больше красивых камней');
+    final titleColor = failed
+        ? const Color(0xFFEF5350)
+        : (win ? const Color(0xFF81C784) : const Color(0xFFFF7043));
 
     return Material(
       color: Colors.black.withValues(alpha: 0.78),
@@ -41,12 +53,10 @@ class ResultsOverlay extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        win ? 'ТЫ ПОБЕДИЛ!' : 'ВОР ПОБЕДИЛ!',
+                        title,
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: win
-                              ? const Color(0xFF81C784)
-                              : const Color(0xFFFF7043),
+                          color: titleColor,
                           fontSize: 34,
                           fontWeight: FontWeight.w900,
                           height: 1.05,
@@ -54,9 +64,7 @@ class ResultsOverlay extends StatelessWidget {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        win
-                            ? 'У тебя больше красивых камней'
-                            : 'Вор унёс больше красивых камней',
+                        subtitle,
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.75),

@@ -14,35 +14,25 @@ class GameConfig {
   static double get levelLengthMeters =>
       corridorSegmentMeters * corridorCount;
 
-  /// Subway-style pace: starts calm, keeps climbing through the run.
-  /// (−15% vs original 14→44 so the run feels controlled, not frantic.)
+  /// Subway-style pace: starts calm, steps up every [speedStepMeters].
   static const double runSpeedStart = 11.9;
-  static const double runSpeedEnd = 37.4;
 
   /// Speed jumps every this many meters.
   static const double speedStepMeters = 200;
 
-  /// Standard mode: +15% of start speed every [speedStepMeters].
-  static const double speedStepBoost = 0.15;
+  /// +25% of start every 200 m (was +15%, +10% more on top).
+  static const double speedStepBoost = 0.25;
 
   /// HUD/corridor meters still say 700 — but they tick this fraction of pace
   /// (lower = longer shafts). 0.62 ≈ +17% duration vs previous 0.75.
   static const double distanceMeterRate = 0.62;
 
-  /// World run speed. Standard: +15% every 200 m. Long: soft linear ramp.
+  /// World run speed — +25% of start every 200 m (both modes).
   static double runSpeedAt(double progress) {
     final distance = (progress.clamp(0.0, 1.0)) * levelLengthMeters;
     final step = (distance / speedStepMeters).floor();
-
-    if (GameSettings.instance.runMode == RunMode.standard) {
-      // 0m → start, 200m → +15%, 400m → +30%, …
-      return runSpeedStart * (1.0 + speedStepBoost * step);
-    }
-
-    final maxStep = (levelLengthMeters / speedStepMeters).floor();
-    if (maxStep <= 0) return runSpeedStart;
-    final t = step.clamp(0, maxStep) / maxStep;
-    return runSpeedStart + (runSpeedEnd - runSpeedStart) * t;
+    // 0m → start, 200m → ×1.25, 400m → ×1.50, …
+    return runSpeedStart * (1.0 + speedStepBoost * step);
   }
 
   /// How fast run-cycle anim plays vs base (matches world pace).
@@ -63,22 +53,24 @@ class GameConfig {
   /// Thief can pull up to ~10 m ahead on a long mistake streak (was 5).
   static const double minLeadDistance = -10.0;
 
-  /// Success — you pull ahead; streak makes the gap even bigger.
-  static const double leadGainOnCatch = 0.8;
-  static const double leadGainOnRare = 2.4;
-  static const double leadGainOnCombo = 1.5;
-  /// Extra lead meters added for each catch in a success streak.
-  static const double successStreakLeadBonus = 0.55;
-  /// Mistakes add chase debt — thief closes gradually, not in one jump.
-  static const double leadLossOnMiss = 0.7;
-  static const double leadLossOnMissRare = 1.0;
-  static const double leadLossOnBomb = 1.1;
-  static const double leadLossPerMistakeStreak = 0.4;
+  /// Coins never push lead (columns are free score). Lead is jewel/mistake based.
+  static const double leadGainOnCatch = 0.0;
+  /// Jewels are the contested prize — catching them opens the gap.
+  static const double leadGainOnRare = 1.8;
+  static const double leadGainOnCombo = 1.2;
+  /// Extra lead meters added for each jewel catch in a success streak.
+  static const double successStreakLeadBonus = 0.4;
+  /// Miss a coin — thief closes in (the real chase pressure).
+  static const double leadLossOnMiss = 1.05;
+  static const double leadLossOnMissRare = 1.55;
+  static const double leadLossOnBomb = 1.25;
+  static const double leadLossPerMistakeStreak = 0.45;
   /// How fast pending chase debt drains into real lead (m/s).
-  static const double leadDebtPerSec = 1.05;
+  static const double leadDebtPerSec = 1.2;
   /// Enough debt to push thief toward the full −10 m gap.
   static const double leadDebtMax = 9.0;
-  static const double leadRecoverPerSec = 0.1;
+  /// Slow recover only while playing clean (no misses).
+  static const double leadRecoverPerSec = 0.14;
   /// How fast the thief eases when you pull ahead (goes back).
   static const double leadVisualFollow = 1.35;
   /// How fast he eases when closing after your mistakes (slow approach).
@@ -149,8 +141,8 @@ class GameConfig {
   static const double webCatchRadius = 13;
   /// Web appears from this 1-based shaft onward (1 = from the start).
   static const int webFromCorridor = 1;
-  /// Chance a normal spawn beat becomes a web (once eligible).
-  static const double webSpawnChance = 0.10;
+  /// Chance a normal spawn beat becomes a web (once eligible). +10% traps.
+  static const double webSpawnChance = 0.11;
   /// How long the player stays sticky/slow after touching a web.
   static const double webSnareDuration = 3.0;
   /// Player control sluggishness while snared (1 = normal, lower = slower).
@@ -164,9 +156,18 @@ class GameConfig {
   static const int bombLaneCount = 3;
   /// Chance a bomb beat is a 2-lane gate (one free lane) instead of a single.
   static const double bombDualChance = 0.48;
-  /// Min/max pause before the next bomb pattern (~10% more bombs vs 1.5–2.9).
-  static const double bombCooldownMin = 1.35;
-  static const double bombCooldownMax = 2.6;
+  /// Min/max pause before the next bomb pattern (+10% trap density).
+  static const double bombCooldownMin = 1.2;
+  static const double bombCooldownMax = 2.35;
+
+  // ── Pit (black hole) — instant fail ──────────────────────────────────────
+  static const double pitDisplaySize = 52;
+  /// Touch radius vs player feet / basket — forgiving edge, lethal center.
+  static const double pitCatchRadius = 22;
+  /// Pattern chance for a pit trap (also gated by cooldown in director).
+  static const double pitSpawnChance = 0.09;
+  static const double pitRespawnMin = 10;
+  static const double pitRespawnMax = 18;
 
   /// Walkable stone path inset from each screen edge (player steering).
   /// ~0.27 keeps the miner on the cobbles, out of wall mushrooms/ice.
