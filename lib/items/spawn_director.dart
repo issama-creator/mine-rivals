@@ -19,7 +19,7 @@ class SpawnDirector {
   }
 
   void update(double dt, {double progress = 0}) {
-    final tempo = 1.0 + progress * 0.55;
+    final tempo = GameConfig.spawnTempoAt(progress);
     waveLeft -= dt * tempo;
     if (waveLeft > 0 && _burstLeft <= 0) return;
     if (_burstLeft > 0) return;

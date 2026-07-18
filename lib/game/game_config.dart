@@ -6,35 +6,39 @@ class GameConfig {
   static const double levelLengthMeters =
       corridorSegmentMeters * corridorCount;
 
-  /// Pace climbs each corridor (level) — clear bump shaft to shaft.
-  static const double runSpeedStart = 15;
-  static const double runSpeedPerCorridor = 1.55;
-  static const double runSpeedEnd = 31;
+  /// Subway-style pace: starts calm, keeps climbing through the run.
+  /// (−15% vs original 14→44 so the run feels controlled, not frantic.)
+  static const double runSpeedStart = 11.9;
+  static const double runSpeedEnd = 37.4;
 
-  /// World run speed from overall progress (0..1).
+  /// Speed jumps up by a fixed chunk every this many meters (linear steps).
+  static const double speedStepMeters = 200;
+
+  /// HUD/corridor meters still say 700 — but they tick this fraction of pace
+  /// (0.75 = 25% slower distance, longer shafts without changing the label).
+  static const double distanceMeterRate = 0.75;
+
+  /// World run speed — linear steps every [speedStepMeters] (no curve).
   static double runSpeedAt(double progress) {
-    final t = progress.clamp(0.0, 1.0);
-    // Corridor index 0..9 plus soft blend inside the shaft.
-    final corridorF = t * corridorCount;
-    final corridor = corridorF.floor().clamp(0, corridorCount - 1);
-    final within = (corridorF - corridor).clamp(0.0, 1.0);
-    final base = runSpeedStart + corridor * runSpeedPerCorridor;
-    final next = runSpeedStart +
-        (corridor + 1).clamp(0, corridorCount) * runSpeedPerCorridor;
-    final speed = base + (next - base) * within * 0.55;
-    return speed.clamp(runSpeedStart, runSpeedEnd);
+    final distance = (progress.clamp(0.0, 1.0)) * levelLengthMeters;
+    final maxStep = (levelLengthMeters / speedStepMeters).floor();
+    if (maxStep <= 0) return runSpeedStart;
+    final step =
+        (distance / speedStepMeters).floor().clamp(0, maxStep);
+    final t = step / maxStep;
+    return runSpeedStart + (runSpeedEnd - runSpeedStart) * t;
   }
 
   /// How fast run-cycle anim plays vs base (matches world pace).
   static double runAnimRateAt(double progress) {
     final pace = runSpeedAt(progress);
-    return (pace / runSpeedStart).clamp(0.95, 2.05);
+    return (pace / runSpeedStart).clamp(1.0, 2.9);
   }
 
-  /// Spawn density grows gently toward the end.
+  /// Spawn density — late shafts throw loot much denser.
   static double spawnTempoAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
-    return 1.0 + t * 0.55;
+    return 1.0 + t * 1.25;
   }
 
   /// Start with a clear ~5 m gap; clean play caps around there.
@@ -74,10 +78,10 @@ class GameConfig {
   static const double chaseArrowLeadMin = 2.6;
   static const int comboThreshold = 8;
 
-  static const double itemFallSpeedMin = 140;
-  static const double itemFallSpeedMax = 220;
-  static const double spawnIntervalStart = 1.05;
-  static const double spawnIntervalMin = 0.55;
+  static const double itemFallSpeedMin = 160;
+  static const double itemFallSpeedMax = 280;
+  static const double spawnIntervalStart = 1.0;
+  static const double spawnIntervalMin = 0.38;
 
   static const double playerWidth = 66;
   static const double playerHeight = 128;

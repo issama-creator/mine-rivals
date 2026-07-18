@@ -45,8 +45,6 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
 
   bool get magnetized => magnetBy != ItemMagnet.none;
 
-  ColorFilter? get _tint => null;
-
   void recycle({
     required Vector2 newPosition,
     required double newSpeed,
@@ -160,26 +158,11 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     if (type.isJewel) {
       final pulse = 0.55 + 0.2 * sin(_pulse);
       final c = Offset(size.x / 2, size.y * 0.52);
-      // Soft halo so gems don't vanish into corridor art.
+      // One soft halo — enough to read gems without heavy overdraw.
       canvas.drawCircle(
         c,
-        size.x * 0.52,
-        Paint()..color = type.color.withValues(alpha: 0.16 + pulse * 0.10),
-      );
-      canvas.drawCircle(
-        c,
-        size.x * 0.38,
-        Paint()
-          ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.10 + pulse * 0.06),
-      );
-      // Thin colored rim — light outline, not a heavy frame.
-      canvas.drawCircle(
-        c,
-        size.x * 0.46,
-        Paint()
-          ..color = type.color.withValues(alpha: 0.45 + pulse * 0.20)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.35,
+        size.x * 0.48,
+        Paint()..color = type.color.withValues(alpha: 0.18 + pulse * 0.12),
       );
     }
 
@@ -191,96 +174,50 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     if (type.isBomb) {
       final warn = 0.5 + 0.5 * sin(_pulse * 1.55);
       final c = Offset(size.x / 2, size.y / 2);
-      // Soft pulsing red — no hard permanent ring.
       canvas.drawCircle(
         c,
-        size.x * (0.42 + warn * 0.10),
+        size.x * (0.40 + warn * 0.08),
         Paint()
-          ..color = const Color(0xFFFF1744).withValues(alpha: 0.10 + warn * 0.28),
-      );
-      canvas.drawCircle(
-        c,
-        size.x * (0.28 + warn * 0.06),
-        Paint()
-          ..color = const Color(0xFFFF5252).withValues(alpha: 0.06 + warn * 0.18),
+          ..color = const Color(0xFFFF1744).withValues(alpha: 0.12 + warn * 0.22),
       );
     }
 
-    final tint = type.isBomb
-        ? const ColorFilter.matrix(<double>[
-            // Boost red / lift midtones so the bomb pops on brown corridors.
-            1.35, 0.05, 0.05, 0, 18,
-            0.05, 1.05, 0.05, 0, 8,
-            0.00, 0.00, 1.00, 0, 4,
-            0, 0, 0, 1, 0,
-          ])
-        : _tint;
-    if (tint != null) {
-      canvas.saveLayer(size.toRect(), Paint()..colorFilter = tint);
-      super.render(canvas);
-      canvas.restore();
-      return;
-    }
+    // Plain sprite blit — no ColorFilter saveLayer (FPS).
     super.render(canvas);
   }
 
-  /// Procedural sticky spider web — no sprite asset needed.
+  /// Lightweight sticky web (6 spokes, 2 rings).
   void _renderWeb(Canvas canvas) {
     final c = Offset(size.x / 2, size.y / 2);
     final r = size.x * 0.48;
-    final breath = 0.85 + 0.15 * sin(_pulse * 0.9);
+    final breath = 0.9 + 0.1 * sin(_pulse * 0.9);
 
-    // Soft sticky halo.
-    canvas.drawCircle(
-      c,
-      r * breath,
-      Paint()..color = Colors.white.withValues(alpha: 0.08),
-    );
-
-    const spokes = 8;
     final strand = Paint()
-      ..color = Colors.white.withValues(alpha: 0.82)
+      ..color = Colors.white.withValues(alpha: 0.78)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2
+      ..strokeWidth = 1.15
       ..strokeCap = StrokeCap.round;
-    final strandSoft = Paint()
-      ..color = Colors.white.withValues(alpha: 0.42)
+    final ringPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.4)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
-    // Radial spokes.
+    const spokes = 6;
     for (var i = 0; i < spokes; i++) {
       final a = (i / spokes) * pi * 2;
-      final p = Offset(c.dx + cos(a) * r, c.dy + sin(a) * r);
-      canvas.drawLine(c, p, strand);
+      canvas.drawLine(
+        c,
+        Offset(c.dx + cos(a) * r, c.dy + sin(a) * r),
+        strand,
+      );
     }
-
-    // Concentric rings connecting the spokes.
-    for (final ring in const [0.32, 0.62, 0.92]) {
-      final rr = r * ring * breath;
-      final path = Path();
-      for (var i = 0; i <= spokes; i++) {
-        final a = (i / spokes) * pi * 2;
-        final p = Offset(c.dx + cos(a) * rr, c.dy + sin(a) * rr);
-        if (i == 0) {
-          path.moveTo(p.dx, p.dy);
-        } else {
-          // Slight inward sag between spokes for a woven look.
-          final aPrev = ((i - 1) / spokes) * pi * 2;
-          final mid = (a + aPrev) / 2;
-          final sag = rr * 0.82;
-          final cp = Offset(c.dx + cos(mid) * sag, c.dy + sin(mid) * sag);
-          path.quadraticBezierTo(cp.dx, cp.dy, p.dx, p.dy);
-        }
-      }
-      canvas.drawPath(path, strandSoft);
+    for (final ring in const [0.4, 0.85]) {
+      canvas.drawCircle(c, r * ring * breath, ringPaint);
     }
-
-    // Center knot.
     canvas.drawCircle(
       c,
-      2.2,
-      Paint()..color = Colors.white.withValues(alpha: 0.9),
+      2.0,
+      Paint()..color = Colors.white.withValues(alpha: 0.85),
     );
   }
 }

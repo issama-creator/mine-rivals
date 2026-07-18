@@ -37,6 +37,8 @@ class MineRivalsGame extends FlameGame
   final SpawnDirector spawns = SpawnDirector();
   final AudioManager audio = AudioManager();
   final Random _rng = Random();
+  /// Active falling loot — avoids walking the whole component tree each frame.
+  final List<FallingItem> liveItems = [];
 
   late PlayerComponent player;
   late ThiefComponent thief;
@@ -236,7 +238,7 @@ class MineRivalsGame extends FlameGame
     final pace = GameConfig.runSpeedAt(progress);
     final animRate = GameConfig.runAnimRateAt(progress);
 
-    distance += pace * step;
+    distance += pace * step * GameConfig.distanceMeterRate;
     background.setWorldSpeed(pace * _playRate);
     player.setRunAnimRate(animRate);
     for (final t in _pack) {
@@ -293,11 +295,12 @@ class MineRivalsGame extends FlameGame
     _updateDrawOrder();
 
     dustTimer += step;
-    if (dustTimer > 0.22) {
+    if (dustTimer > 0.45) {
       dustTimer = 0;
-      add(DustPuff(position: player.position + Vector2(0, -6)));
-      if (_rng.nextBool()) {
-        add(DustPuff(position: thief.position + Vector2(0, -6)));
+      // Cap concurrent dust so particles don't pile up.
+      final dustLive = children.whereType<DustPuff>().length;
+      if (dustLive < 3) {
+        add(DustPuff(position: player.position + Vector2(0, -6)));
       }
     }
 
@@ -345,7 +348,7 @@ class MineRivalsGame extends FlameGame
 
   void _magnetAndCatchUpdate(double dt) {
     final basket = player.basketWorldCenter;
-    for (final item in children.whereType<FallingItem>().toList()) {
+    for (final item in List<FallingItem>.of(liveItems)) {
       if (item.collected || item.stolen) continue;
 
       // Non-jewels (coin, bar, bomb, web): player only — thief phases through.
@@ -402,13 +405,13 @@ class MineRivalsGame extends FlameGame
         (lead.isOvertaking && lead.pendingLeader == Leader.thief);
 
     if (!thiefHuntsJewels) {
-      for (final item in children.whereType<FallingItem>()) {
+      for (final item in liveItems) {
         item.setThiefMagnet(false);
       }
       return;
     }
 
-    for (final item in children.whereType<FallingItem>().toList()) {
+    for (final item in List<FallingItem>.of(liveItems)) {
       if (item.collected || item.stolen) continue;
 
       // Same rule as coins: phase through ALL non-jewels (bars, bombs, junk).
@@ -462,8 +465,7 @@ class MineRivalsGame extends FlameGame
 
     var type = spawns.rollType(progress: progress);
     if (type.isBomb) {
-      final bombLive =
-          children.whereType<FallingItem>().any((e) => e.type.isBomb);
+      final bombLive = liveItems.any((e) => e.type.isBomb);
       if (bombLive || _bombCooldown > 0) {
         type = _rng.nextBool() ? ItemType.gold : ItemType.coal;
       } else {
@@ -477,24 +479,41 @@ class MineRivalsGame extends FlameGame
     if (!type.isBomb &&
         level >= GameConfig.webFromCorridor &&
         _rng.nextDouble() < GameConfig.webSpawnChance &&
-        !children.whereType<FallingItem>().any((e) => e.type.isWeb)) {
+        !liveItems.any((e) => e.type.isWeb)) {
       final lane = _rng.nextInt(GameConfig.bombLaneCount);
-      final item = pool.acquire(
+      _spawnLiveItem(
         type: ItemType.web,
         position: Vector2(_laneX(lane), -40),
         fallSpeed: background.speed,
       );
-      add(item);
       return;
     }
 
     final x = _pickLootX();
-    final item = pool.acquire(
+    _spawnLiveItem(
       type: type,
       position: Vector2(x, -40),
       fallSpeed: background.speed,
     );
+  }
+
+  void _spawnLiveItem({
+    required ItemType type,
+    required Vector2 position,
+    required double fallSpeed,
+  }) {
+    final item = pool.acquire(
+      type: type,
+      position: position,
+      fallSpeed: fallSpeed,
+    );
+    liveItems.add(item);
     add(item);
+  }
+
+  void _releaseLiveItem(FallingItem item) {
+    liveItems.remove(item);
+    pool.release(item);
   }
 
   /// Single bomb OR a 2-lane gate — always exactly one free row to dodge.
@@ -512,12 +531,11 @@ class MineRivalsGame extends FlameGame
       }
       for (var lane = 0; lane < GameConfig.bombLaneCount; lane++) {
         if (lane == freeLane) continue;
-        final item = pool.acquire(
+        _spawnLiveItem(
           type: ItemType.bomb,
           position: Vector2(_laneX(lane), y),
           fallSpeed: speed,
         );
-        add(item);
       }
       // Remember free lane so the next gate opens somewhere else.
       _lastBombLane = freeLane;
@@ -528,12 +546,11 @@ class MineRivalsGame extends FlameGame
       final lane =
           lanes.isEmpty ? _rng.nextInt(GameConfig.bombLaneCount) : lanes.first;
       _lastBombLane = lane;
-      final item = pool.acquire(
+      _spawnLiveItem(
         type: ItemType.bomb,
         position: Vector2(_laneX(lane), y),
         fallSpeed: speed,
       );
-      add(item);
     }
 
     _bombCooldown = GameConfig.bombCooldownMin +
@@ -558,7 +575,7 @@ class MineRivalsGame extends FlameGame
 
   void _missUpdate() {
     final basket = player.basketWorldCenter;
-    for (final item in children.whereType<FallingItem>().toList()) {
+    for (final item in List<FallingItem>.of(liveItems)) {
       if (item.collected || item.stolen) continue;
 
       final pastBottom = item.position.y > size.y + 60;
@@ -593,7 +610,7 @@ class MineRivalsGame extends FlameGame
         }
       }
       item.magnetBy = ItemMagnet.none;
-      pool.release(item);
+      _releaseLiveItem(item);
     }
   }
 
@@ -684,7 +701,7 @@ class MineRivalsGame extends FlameGame
                 : Colors.orangeAccent,
           ),
         );
-        pool.release(item);
+        _releaseLiveItem(item);
         return;
       }
 
@@ -702,7 +719,7 @@ class MineRivalsGame extends FlameGame
             color: const Color(0xFFB0BEC5),
           ),
         );
-        pool.release(item);
+        _releaseLiveItem(item);
         return;
       }
 
@@ -725,7 +742,7 @@ class MineRivalsGame extends FlameGame
           color: item.type.color,
         ),
       );
-      pool.release(item);
+      _releaseLiveItem(item);
       return;
     }
 
@@ -763,7 +780,7 @@ class MineRivalsGame extends FlameGame
       ParticleBurst(
         position: item.position.clone(),
         color: item.type.color,
-        count: 18,
+        count: 12,
       ),
     );
     add(
@@ -773,7 +790,7 @@ class MineRivalsGame extends FlameGame
         color: item.type.color,
       ),
     );
-    pool.release(item);
+    _releaseLiveItem(item);
   }
 
   void _thiefSteal(FallingItem item) {
@@ -805,7 +822,7 @@ class MineRivalsGame extends FlameGame
         color: item.type.color,
       ),
     );
-    pool.release(item);
+    _releaseLiveItem(item);
   }
 
   void _beginFinishBeat() {
@@ -873,7 +890,9 @@ class MineRivalsGame extends FlameGame
   void restart() {
     overlays.remove('results');
     overlays.remove('pause');
-    children.whereType<FallingItem>().toList().forEach((e) => e.removeFromParent());
+    for (final e in List<FallingItem>.of(liveItems)) {
+      _releaseLiveItem(e);
+    }
     children.whereType<FloatingText>().toList().forEach((e) => e.removeFromParent());
     children.whereType<CorridorTitle>().toList().forEach((e) => e.removeFromParent());
     children.whereType<DustPuff>().toList().forEach((e) => e.removeFromParent());
@@ -974,7 +993,7 @@ class MineRivalsGame extends FlameGame
 
     AssetLibrary.applyCorridorJewels(idx);
     // Live jewels + pooled ones pick up the new shaft art.
-    for (final item in children.whereType<FallingItem>()) {
+    for (final item in liveItems) {
       if (item.type.isJewel) item.refreshSprite();
     }
     pool.clearJewels();

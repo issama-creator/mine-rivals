@@ -64,7 +64,6 @@ flutter:
     - assets/tunnel.png
     - assets/audio/
     - assets/images/bgc/
-    - assets/images/kristales/
     - assets/images/kristales/crops/
     - assets/images/vors/
     # Skins — listed explicitly (directory entries can miss on some rebuilds).

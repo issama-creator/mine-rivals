@@ -44,7 +44,7 @@ class AssetLibrary {
 
   /// Per corridor: 3 gem sprites [0]=diamond, [1]=ruby, [2]=emerald.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 19;
+  static const int _assetVersion = 21;
   static int _loadedVersion = 0;
 
   static bool get ready =>
@@ -153,7 +153,8 @@ class AssetLibrary {
     items[ItemType.legendary] = gems[4];
   }
 
-  /// Slice frames and bottom-center each one so the run cycle doesn't hop.
+  /// Slice run frames: drop sheet bleed, plant feet, keep hand/basket X stable.
+  /// Skips duplicate row/cells and arm-flare outliers that make hands "pop".
   static Future<SpriteAnimation> _sliceRunAnimationStabilized(
     ui.Image image, {
     required int columns,
@@ -171,68 +172,205 @@ class AssetLibrary {
 
     int idx(int x, int y) => (y * imgW + x) * 4;
 
+    // Build raw cells for row 0 first; row 1 is almost always a duplicate.
+    final cellCount = columns; // one run cycle row
+    final keeps = <List<bool>>[];
+    final upperWidths = <int>[];
+    final fingerprints = <int>[];
+
+    for (var col = 0; col < cellCount; col++) {
+      final ox = col * frameW;
+      final oy = 0;
+
+      final opaque = List<bool>.filled(frameW * frameH, false);
+      var any = false;
+      for (var y = 0; y < frameH; y++) {
+        for (var x = 0; x < frameW; x++) {
+          if (src[idx(ox + x, oy + y) + 3] < 16) continue;
+          opaque[y * frameW + x] = true;
+          any = true;
+        }
+      }
+
+      final keep = any
+          ? _keepBodyComponents(opaque, frameW, frameH)
+          : opaque;
+      keeps.add(keep);
+
+      var minX = frameW;
+      var maxX = 0;
+      var upperW = 0;
+      var fp = 0;
+      final midY = (frameH * 0.45).round();
+      for (var y = 0; y < frameH; y++) {
+        for (var x = 0; x < frameW; x++) {
+          if (!keep[y * frameW + x]) continue;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < midY) {
+            upperW++;
+            fp = (fp * 33 + x * 17 + y) & 0x7fffffff;
+          } else {
+            fp = (fp * 31 + x + y * 3) & 0x7fffffff;
+          }
+        }
+      }
+      upperWidths.add(upperW);
+      fingerprints.add(fp);
+    }
+
+    // Drop near-duplicate consecutive cells (sheets often repeat poses).
+    final picked = <int>[];
+    for (var i = 0; i < cellCount; i++) {
+      if (picked.isEmpty) {
+        picked.add(i);
+        continue;
+      }
+      final prev = picked.last;
+      if (fingerprints[i] == fingerprints[prev]) continue;
+      // Near-identical silhouette → stutter hold, skip.
+      final a = upperWidths[i];
+      final b = upperWidths[prev];
+      final similarUpper = a > 0 &&
+          b > 0 &&
+          (a - b).abs() / max(a, b) < 0.04 &&
+          fingerprints[i] ~/ 1000 == fingerprints[prev] ~/ 1000;
+      if (similarUpper) continue;
+      picked.add(i);
+    }
+    if (picked.length < 4) {
+      picked
+        ..clear()
+        ..addAll(List.generate(min(6, cellCount), (i) => i));
+    }
+
+    // Drop arm-flare outliers (hands jump up the barrel rim).
+    final widths = [
+      for (final i in picked) upperWidths[i],
+    ]..sort();
+    final medianUpper = widths[widths.length ~/ 2];
+    final smoothed = <int>[];
+    for (final i in picked) {
+      if (medianUpper > 0 && upperWidths[i] > medianUpper * 1.14) {
+        // Keep the stride pose but reuse previous calm arms/hands silhouette
+        // by skipping this flare cell entirely.
+        continue;
+      }
+      smoothed.add(i);
+    }
+    final sequence = smoothed.length >= 4 ? smoothed : picked;
+
     final frames = <Sprite>[];
-    for (var row = 0; row < rows; row++) {
-      for (var col = 0; col < columns; col++) {
-        final ox = col * frameW;
-        final oy = row * frameH;
+    for (final col in sequence) {
+      final ox = col * frameW;
+      final keep = keeps[col];
 
-        var minX = frameW;
-        var minY = frameH;
-        var maxX = 0;
-        var maxY = 0;
-        var found = false;
+      var maxY = 0;
+      var found = false;
+      for (var y = 0; y < frameH; y++) {
+        for (var x = 0; x < frameW; x++) {
+          if (!keep[y * frameW + x]) continue;
+          found = true;
+          if (y > maxY) maxY = y;
+        }
+      }
 
+      final out = Uint8List(frameW * frameH * 4);
+      if (found) {
+        // Plant feet only — keep original X so hands don't slide on the rim.
+        final shiftY = (frameH - 2) - maxY;
         for (var y = 0; y < frameH; y++) {
           for (var x = 0; x < frameW; x++) {
-            final a = src[idx(ox + x, oy + y) + 3];
-            if (a < 20) continue;
-            found = true;
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
+            if (!keep[y * frameW + x]) continue;
+            final dx = x;
+            final dy = y + shiftY;
+            if (dx < 0 || dy < 0 || dx >= frameW || dy >= frameH) continue;
+            final si = idx(ox + x, y);
+            final di = (dy * frameW + dx) * 4;
+            out[di] = src[si];
+            out[di + 1] = src[si + 1];
+            out[di + 2] = src[si + 2];
+            out[di + 3] = src[si + 3];
           }
         }
+      }
 
-        final out = Uint8List(frameW * frameH * 4);
-        if (found) {
-          final contentW = maxX - minX + 1;
-          final contentH = maxY - minY + 1;
-          // Bottom-center: plant feet, keep basket stable horizontally.
-          final dstX = ((frameW - contentW) / 2).round();
-          final dstY = frameH - contentH - 2;
-          for (var y = 0; y < contentH; y++) {
-            for (var x = 0; x < contentW; x++) {
-              final sx = ox + minX + x;
-              final sy = oy + minY + y;
-              final dx = dstX + x;
-              final dy = dstY + y;
-              if (dx < 0 || dy < 0 || dx >= frameW || dy >= frameH) continue;
-              final si = idx(sx, sy);
-              final di = (dy * frameW + dx) * 4;
-              out[di] = src[si];
-              out[di + 1] = src[si + 1];
-              out[di + 2] = src[si + 2];
-              out[di + 3] = src[si + 3];
-            }
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromPixels(
+        out,
+        frameW,
+        frameH,
+        ui.PixelFormat.rgba8888,
+        completer.complete,
+      );
+      frames.add(Sprite(await completer.future));
+    }
+
+    // Slightly slower step if we dropped frames — same real stride feel.
+    final tunedStep = stepTime * (cellCount / max(frames.length, 1)).clamp(1.0, 1.35);
+    return SpriteAnimation.spriteList(frames, stepTime: tunedStep, loop: true);
+  }
+
+  /// Keep the body blob + any sizable nearby scraps (hands), drop tiny bleed.
+  static List<bool> _keepBodyComponents(
+    List<bool> opaque,
+    int w,
+    int h,
+  ) {
+    final seen = List<bool>.filled(w * h, false);
+    final starts = <int>[];
+    final counts = <int>[];
+    final stack = <int>[];
+
+    void flood(int start, void Function(int i) visit) {
+      stack
+        ..clear()
+        ..add(start);
+      seen[start] = true;
+      while (stack.isNotEmpty) {
+        final i = stack.removeLast();
+        visit(i);
+        final x = i % w;
+        final y = i ~/ w;
+        // 8-connected — thin wrists stay attached to the body.
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            final nx = x + dx;
+            final ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            final ni = ny * w + nx;
+            if (seen[ni] || !opaque[ni]) continue;
+            seen[ni] = true;
+            stack.add(ni);
           }
         }
-
-        final completer = Completer<ui.Image>();
-        ui.decodeImageFromPixels(
-          out,
-          frameW,
-          frameH,
-          ui.PixelFormat.rgba8888,
-          completer.complete,
-        );
-        final frameImage = await completer.future;
-        frames.add(Sprite(frameImage));
       }
     }
 
-    return SpriteAnimation.spriteList(frames, stepTime: stepTime, loop: true);
+    for (var i = 0; i < opaque.length; i++) {
+      if (!opaque[i] || seen[i]) continue;
+      var count = 0;
+      flood(i, (_) => count++);
+      starts.add(i);
+      counts.add(count);
+    }
+
+    var best = 0;
+    for (final c in counts) {
+      if (c > best) best = c;
+    }
+    final keep = List<bool>.filled(w * h, false);
+    if (best <= 0) return keep;
+
+    // Keep main body + any chunk big enough to be a hand/arm (not bleed dust).
+    final minKeep = max(28, (best * 0.045).round());
+    seen.fillRange(0, seen.length, false);
+    for (var ci = 0; ci < starts.length; ci++) {
+      if (counts[ci] < minKeep) continue;
+      flood(starts[ci], (i) => keep[i] = true);
+    }
+    return keep;
   }
 
   static SpriteAnimation _sliceRunAnimationFallback(

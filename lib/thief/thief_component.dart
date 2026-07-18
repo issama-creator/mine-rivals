@@ -44,7 +44,7 @@ class ThiefComponent extends SpriteAnimationComponent {
       };
 
   void setRunAnimRate(double rate) {
-    _animRate = rate.clamp(0.9, 2.1);
+    _animRate = rate.clamp(0.95, 3.0);
   }
 
   @override

@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import '../game/asset_library.dart';
 import '../game/game_config.dart';
 
-/// Repeats the active corridor vertically.
-/// Biome changes: long soft wipe + crossfade (enter-the-tunnel feel).
+/// Repeats the active corridor vertically — soft-blends seams so the join
+/// is not a hard cut (bgc art is not perfectly tileable).
 class ParallaxBackground extends PositionComponent {
   ParallaxBackground({required Vector2 size})
       : super(size: size, priority: -100);
@@ -19,9 +19,14 @@ class ParallaxBackground extends PositionComponent {
   /// 0 = still old corridor, 1 = fully in the new one.
   double _enterT = 1;
 
-  static const double _seamBlend = 0.07;
-  /// Soft “run into the next shaft” — longer = prettier.
-  static const double _enterSec = 3.8;
+  /// Soft “run into the next shaft”.
+  static const double _enterSec = 1.55;
+
+  /// Soft seam only — larger values double lanterns/gems on the walls.
+  static const double _seamBlend = 0.08;
+
+  Paint? _hudFadePaint;
+  Size? _hudFadeSize;
 
   bool get isEnteringCorridor => _enterT < 1;
 
@@ -35,7 +40,14 @@ class ParallaxBackground extends PositionComponent {
     _enterT = 1;
   }
 
-  /// Begin a smooth enter into biome [index] (0..corridorCount-1).
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+    _hudFadePaint = null;
+    _hudFadeSize = null;
+  }
+
+  /// Begin a soft enter into biome [index] (0..corridorCount-1).
   void setCorridorIndex(int index) {
     final next = index.clamp(0, GameConfig.corridorCount - 1);
     if (next == corridorIndex && _tunnel != null) return;
@@ -66,28 +78,20 @@ class ParallaxBackground extends PositionComponent {
 
     if (entering) {
       final eased = Curves.easeInOutCubic.transform(_enterT);
-      // Old dissolves while new blooms in — no hard cut.
-      _drawTiled(
-        canvas,
-        prev,
-        opacity: (1.0 - Curves.easeIn.transform(eased) * 0.92)
-            .clamp(0.08, 1.0),
-      );
-      _drawEnterWipe(
-        canvas,
-        next,
-        _enterT,
-        opacity: 0.22 + Curves.easeOutCubic.transform(eased) * 0.78,
-      );
-      _drawThresholdVeil(canvas, _enterT);
+      _drawTiled(canvas, prev, opacity: (1.0 - eased).clamp(0.0, 1.0));
+      _drawTiled(canvas, next, opacity: eased.clamp(0.0, 1.0));
     } else if (next != null) {
       _drawTiled(canvas, next, opacity: 1);
     }
 
-    // Soft top fade for HUD readability.
-    canvas.drawRect(
-      rect,
-      Paint()
+    _drawHudFade(canvas, rect);
+  }
+
+  void _drawHudFade(Canvas canvas, Rect rect) {
+    final sz = Size(rect.width, rect.height);
+    if (_hudFadePaint == null || _hudFadeSize != sz) {
+      _hudFadeSize = sz;
+      _hudFadePaint = Paint()
         ..shader = LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
@@ -97,97 +101,40 @@ class ParallaxBackground extends PositionComponent {
             Colors.transparent,
           ],
           stops: const [0, 0.16, 1],
-        ).createShader(rect),
-    );
-  }
-
-  /// Reveals [sprite] from the top downward with a wide soft edge.
-  void _drawEnterWipe(
-    Canvas canvas,
-    Sprite sprite,
-    double t, {
-    required double opacity,
-  }) {
-    final eased = Curves.easeInOutCubic.transform(t);
-    // Extra-wide feather — the whole reveal stays soft.
-    final edge = 0.38;
-    final reveal = (eased * (1 + edge)).clamp(0.0, 1.0 + edge);
-
-    canvas.saveLayer(
-      size.toRect(),
-      Paint()..color = Color.fromRGBO(255, 255, 255, opacity.clamp(0.0, 1.0)),
-    );
-    _drawTiled(canvas, sprite, opacity: 1);
-    canvas.drawRect(
-      size.toRect(),
-      Paint()
-        ..blendMode = BlendMode.dstIn
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: const [
-            Color(0xFFFFFFFF),
-            Color(0xFFFFFFFF),
-            Color(0x00FFFFFF),
-            Color(0x00FFFFFF),
-          ],
-          stops: [
-            0.0,
-            (reveal - edge).clamp(0.0, 1.0),
-            reveal.clamp(0.0, 1.0),
-            1.0,
-          ],
-        ).createShader(size.toRect()),
-    );
-    canvas.restore();
-  }
-
-  /// Soft warm breath at the midpoint — shaft threshold, not a flash.
-  void _drawThresholdVeil(Canvas canvas, double t) {
-    final mid = Curves.easeInOut.transform(
-      (1 - (t - 0.5).abs() * 2).clamp(0.0, 1.0),
-    );
-    if (mid <= 0.01) return;
-    canvas.drawRect(
-      size.toRect(),
-      Paint()
-        ..shader = RadialGradient(
-          center: const Alignment(0, -0.15),
-          radius: 1.05,
-          colors: [
-            const Color(0xFFFFE0B2).withValues(alpha: 0.07 * mid),
-            Colors.black.withValues(alpha: 0.14 * mid),
-            Colors.transparent,
-          ],
-          stops: const [0.0, 0.45, 1.0],
-        ).createShader(size.toRect()),
-    );
+        ).createShader(rect);
+    }
+    canvas.drawRect(rect, _hudFadePaint!);
   }
 
   void _drawTiled(Canvas canvas, Sprite sprite, {required double opacity}) {
+    if (opacity <= 0.01) return;
+
     final drawW = size.x;
     final drawH = sprite.srcSize.y * (drawW / sprite.srcSize.x);
     final blend = drawH * _seamBlend;
+    // Step shorter than tile height so neighbors overlap for the crossfade.
     final period = drawH - blend;
     final offset = scroll % period;
 
-    final paint = opacity >= 0.999
-        ? null
-        : (Paint()..color = Color.fromRGBO(255, 255, 255, opacity));
-
-    if (paint != null) {
-      canvas.saveLayer(size.toRect(), paint);
+    final fading = opacity < 0.999;
+    if (fading) {
+      canvas.saveLayer(
+        size.toRect(),
+        Paint()..color = Color.fromRGBO(255, 255, 255, opacity),
+      );
     }
 
     for (var y = -drawH + offset; y < size.y + drawH; y += period) {
       _drawSeamlessTile(canvas, sprite, y, drawW, drawH, blend);
     }
 
-    if (paint != null) {
+    if (fading) {
       canvas.restore();
     }
   }
 
+  /// Full tile with transparent→opaque ramp on the top edge so it melts
+  /// into the previous tile instead of showing a hard glue line.
   void _drawSeamlessTile(
     Canvas canvas,
     Sprite sprite,
@@ -196,12 +143,16 @@ class ParallaxBackground extends PositionComponent {
     double drawH,
     double blend,
   ) {
-    final layer = Rect.fromLTWH(0, y, drawW, drawH);
+    // Snap to device pixels — kills 1px black hairlines from subpixel gaps.
+    final yy = y.roundToDouble();
+    final ww = drawW.ceilToDouble();
+    final hh = drawH.ceilToDouble() + 1; // +1px overlap safety
+    final layer = Rect.fromLTWH(0, yy, ww, hh);
     canvas.saveLayer(layer, Paint());
     sprite.render(
       canvas,
-      position: Vector2(0, y),
-      size: Vector2(drawW, drawH),
+      position: Vector2(0, yy),
+      size: Vector2(ww, drawH),
     );
     canvas.drawRect(
       layer,
@@ -215,14 +166,15 @@ class ParallaxBackground extends PositionComponent {
             Color(0xFFFFFFFF),
             Color(0xFFFFFFFF),
           ],
-          stops: [0.0, (blend / drawH).clamp(0.05, 0.45), 1.0],
+          stops: [0.0, (blend / drawH).clamp(0.04, 0.35), 1.0],
         ).createShader(layer),
     );
     canvas.restore();
   }
 
   void setWorldSpeed(double metersPerSec) {
-    speed = 180 + metersPerSec * 5.0;
+    // Scroll tracks pace hard — ~3× visual speed from start → end.
+    speed = 90 + metersPerSec * 12.5;
   }
 
   void resetCorridors() {

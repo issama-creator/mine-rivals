@@ -21,11 +21,41 @@ class _HudOverlayState extends State<HudOverlay> {
   static const _gemYou = 'assets/images/kristales/crops/c1_0.png';
   static const _gemThief = 'assets/images/kristales/crops/c1_1.png';
 
+  int _lastYou = -1;
+  int _lastThief = -1;
+  int _lastMeters = -1;
+  int _lastProgressPct = -1;
+  bool _lastYouLead = true;
+  String? _lastBanner;
+
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 80), (_) {
-      if (mounted) setState(() {});
+    // Light poll — only rebuild when HUD numbers actually change.
+    _timer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      if (!mounted) return;
+      final g = widget.game;
+      final you = g.stats.player.rareTotal;
+      final thief = g.stats.thief.rareTotal;
+      final meters = g.remainingMeters.round();
+      final pct = (g.progress * 100).round();
+      final lead = g.lead.logicalLeader == Leader.player;
+      final banner = g.bannerText;
+      if (you == _lastYou &&
+          thief == _lastThief &&
+          meters == _lastMeters &&
+          pct == _lastProgressPct &&
+          lead == _lastYouLead &&
+          banner == _lastBanner) {
+        return;
+      }
+      _lastYou = you;
+      _lastThief = thief;
+      _lastMeters = meters;
+      _lastProgressPct = pct;
+      _lastYouLead = lead;
+      _lastBanner = banner;
+      setState(() {});
     });
   }
 
@@ -366,7 +396,7 @@ class _CrystalScore extends StatelessWidget {
               asset,
               width: 22,
               height: 22,
-              filterQuality: FilterQuality.high,
+              filterQuality: FilterQuality.medium,
               errorBuilder: (_, __, ___) => Icon(
                 Icons.diamond_rounded,
                 size: 18,
