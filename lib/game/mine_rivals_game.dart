@@ -63,6 +63,24 @@ class MineRivalsGame extends FlameGame
   /// Lead meters still draining after mistakes (thief approaches over time).
   double _leadDebt = 0;
 
+  /// Thief sprint window — closes hard, readable rivalry wave.
+  double _thiefBurstTimer = 0;
+  double _thiefBurstCooldown = 0;
+  double _nextBurstAt = 90;
+
+  bool get isThiefBursting => _thiefBurstTimer > 0;
+
+  /// Gap under [GameConfig.thiefBreathLeadMax] while you still lead.
+  bool get isThiefBreathing =>
+      !finished &&
+      !inChaseIntro &&
+      lead.playerLeads &&
+      lead.leadDistance.abs() <= GameConfig.thiefBreathLeadMax;
+
+  double _breathFlashTimer = 0;
+  double _breathBannerCd = 0;
+  bool _wasBreathing = false;
+
   /// Time left stuck in a spider web (player sluggish, thief gains).
   double _webSnareTimer = 0;
 
@@ -96,6 +114,7 @@ class MineRivalsGame extends FlameGame
   /// Consecutive clean catches — you pull further ahead of the thief.
   int successStreak = 0;
   Vector2 shakeOffset = Vector2.zero();
+
   /// Extra Y (px) when fast — lowers the “camera” for look-ahead.
   double _cameraDipY = 0;
   bool finished = false;
@@ -198,21 +217,21 @@ class MineRivalsGame extends FlameGame
         add(
           ScreenFlash(
             color: const Color(0xFFEF5350),
-            peakAlpha: 0.12,
-            duration: 0.28,
+            peakAlpha: 0.18,
+            duration: 0.34,
           ),
         );
-        _shake(10);
+        _shake(14);
       } else {
         _pulseBanner('Ты впереди', const Color(0xFF66BB6A));
         add(
           ScreenFlash(
             color: const Color(0xFF66BB6A),
-            peakAlpha: 0.1,
-            duration: 0.26,
+            peakAlpha: 0.12,
+            duration: 0.28,
           ),
         );
-        _shake(6);
+        _shake(8);
       }
     };
 
@@ -333,8 +352,10 @@ class MineRivalsGame extends FlameGame
     _syncExtraThieves();
     _syncFinale();
 
+    _updateThiefBurst(step);
     _updateLeadDebt(step);
-    final playingClean = cleanTimer > 2.5 && _leadDebt <= 0;
+    _updateThiefBreath(step);
+    final playingClean = cleanTimer > 2.5 && _leadDebt <= 0 && !isThiefBursting;
     lead.update(step, playingClean: playingClean && !inChaseIntro);
     cleanTimer += step;
 
@@ -350,21 +371,30 @@ class MineRivalsGame extends FlameGame
     }
 
     final depth = lead.depthPositions(screenHeight: size.y, dt: step);
-    // Fast shafts: ease the band down a little so traps read earlier.
+    // Fast shafts: drop the band so traps read earlier (look-ahead).
     final paceRatio =
         GameConfig.runSpeedAt(progress) / GameConfig.runSpeedStart;
-    final dipT = ((paceRatio - GameConfig.cameraSpeedDipFrom) /
-            (GameConfig.cameraSpeedDipFull - GameConfig.cameraSpeedDipFrom))
-        .clamp(0.0, 1.0);
+    final dipSpan =
+        (GameConfig.cameraSpeedDipFull - GameConfig.cameraSpeedDipFrom).clamp(
+          0.05,
+          10.0,
+        );
+    final dipT = ((paceRatio - GameConfig.cameraSpeedDipFrom) / dipSpan).clamp(
+      0.0,
+      1.0,
+    );
     final dipTarget =
-        size.y * GameConfig.cameraSpeedDipMax * Curves.easeInOut.transform(dipT);
-    final dipFollow =
-        1 - (1 / (1 + GameConfig.cameraSpeedDipFollow * step));
+        size.y *
+        GameConfig.cameraSpeedDipMax *
+        Curves.easeOutCubic.transform(dipT);
+    final dipFollow = 1 - (1 / (1 + GameConfig.cameraSpeedDipFollow * step));
     _cameraDipY += (dipTarget - _cameraDipY) * dipFollow;
+    // Keep feet on-screen even at full look-ahead.
+    final maxDip = size.y * 0.94 - depth.playerY;
+    if (_cameraDipY > maxDip) _cameraDipY = max(0, maxDip);
 
     // Straight run — no idle bob; only screen-shake + speed look-ahead.
-    player.position.y =
-        depth.playerY + _cameraDipY + shakeOffset.y * 0.35;
+    player.position.y = depth.playerY + _cameraDipY + shakeOffset.y * 0.35;
     player.applyDepthScale(depth.playerScale, step);
     for (final t in _pack) {
       t.position.y =
@@ -379,17 +409,21 @@ class MineRivalsGame extends FlameGame
     final moveFactor = _webSnareTimer > 0 ? GameConfig.webSnareMoveFactor : 1.0;
     // Finale / late shaft — snappier finger exits from dense trap lines.
     final lateBoost = (inFinale || progress > 0.72)
-        ? GameConfig.playerSteerFinaleBoost
+        ? GameConfig.steerFinaleBoost
         : 1.0;
     player.moveToward(
       desiredX,
       minX,
       maxX,
       step * moveFactor,
-      speed: GameConfig.playerSteerSpeed * lateBoost,
+      speed: GameConfig.steerSpeed * lateBoost,
     );
-    final closeBehind = lead.playerLeads && lead.leadDistance.abs() < 2.2;
-    final sprinting = lead.isOvertaking && lead.sprintOvertake;
+    final closeBehind =
+        isThiefBreathing ||
+        (lead.playerLeads &&
+            lead.leadDistance.abs() < GameConfig.thiefBreathLeadMax + 0.4);
+    final sprinting =
+        isThiefBursting || (lead.isOvertaking && lead.sprintOvertake);
     for (final t in _pack) {
       t.runLane(
         screenCenterX: size.x * 0.5,
@@ -397,8 +431,10 @@ class MineRivalsGame extends FlameGame
         dt: step,
         overtaking: lead.isOvertaking,
         overtakeT: lead.overtakeT,
-        breathingDownNeck: inChaseIntro ||
+        breathingDownNeck:
+            inChaseIntro ||
             closeBehind ||
+            isThiefBursting ||
             (!lead.playerLeads && lead.leadDistance.abs() < 2.2),
         sprinting: sprinting && t.kind == ThiefKind.primary,
       );
@@ -620,8 +656,10 @@ class MineRivalsGame extends FlameGame
 
   /// Thief phases through everything except jewels (magnet + steal when ahead).
   void _stealUpdate(double dt) {
+    // During a burst he snatches even while trailing — rivalry heat.
     final thiefHuntsJewels =
         !lead.playerLeads ||
+        isThiefBursting ||
         (lead.isOvertaking && lead.pendingLeader == Leader.thief);
 
     if (!thiefHuntsJewels) {
@@ -657,13 +695,20 @@ class MineRivalsGame extends FlameGame
       final delta = stealPoint - item.position;
       final dist = delta.length;
       final revenge = !lead.playerLeads;
+      final bursting = isThiefBursting;
       final radius = revenge
           ? GameConfig.thiefRevengeMagnetRadius
-          : GameConfig.thiefMagnetRadius;
+          : (bursting
+                ? GameConfig.thiefBurstMagnetRadius
+                : GameConfig.thiefMagnetRadius);
       final pullSp = revenge
           ? GameConfig.thiefRevengeMagnetPullSpeed
-          : GameConfig.thiefMagnetPullSpeed;
-      final stealAt = revenge ? GameConfig.thiefRevengeStealDist : 22.0;
+          : (bursting
+                ? GameConfig.thiefBurstMagnetPullSpeed
+                : GameConfig.thiefMagnetPullSpeed);
+      final stealAt = revenge
+          ? GameConfig.thiefRevengeStealDist
+          : (bursting ? 26.0 : 22.0);
 
       final inRange =
           dist < radius &&
@@ -775,7 +820,7 @@ class MineRivalsGame extends FlameGame
     );
   }
 
-  void _spawnLiveItem({
+  FallingItem _spawnLiveItem({
     required ItemType type,
     required Vector2 position,
     required double fallSpeed,
@@ -787,6 +832,7 @@ class MineRivalsGame extends FlameGame
     );
     liveItems.add(item);
     add(item);
+    return item;
   }
 
   void _releaseLiveItem(FallingItem item) {
@@ -798,7 +844,11 @@ class MineRivalsGame extends FlameGame
   void _spawnBombPattern(SpawnBeat beat) {
     final dual =
         beat.forceDual ?? (_rng.nextDouble() < GameConfig.bombDualChance);
-    final y = -40.0;
+    final paceRatio =
+        GameConfig.runSpeedAt(progress) / GameConfig.runSpeedStart;
+    final leadT = ((paceRatio - 1.0) / 0.9).clamp(0.0, 1.0);
+    // Spawn higher at speed so bombs spend longer on-screen.
+    final y = -40.0 - GameConfig.bombSpawnLeadPxMax * leadT;
     final speed = background.speed;
 
     if (dual) {
@@ -814,11 +864,7 @@ class MineRivalsGame extends FlameGame
       }
       for (var lane = 0; lane < GameConfig.bombLaneCount; lane++) {
         if (lane == freeLane) continue;
-        _spawnLiveItem(
-          type: ItemType.bomb,
-          position: Vector2(_laneX(lane), y),
-          fallSpeed: speed,
-        );
+        _spawnBombAt(_laneX(lane), y, speed, paceRatio);
       }
       _lastBombLane = freeLane;
     } else {
@@ -832,21 +878,13 @@ class MineRivalsGame extends FlameGame
             : lanes.first;
       }
       _lastBombLane = lane;
-      _spawnLiveItem(
-        type: ItemType.bomb,
-        position: Vector2(_laneX(lane), y),
-        fallSpeed: speed,
-      );
+      _spawnBombAt(_laneX(lane), y, speed, paceRatio);
 
       // Dodge-punish: second bomb arrives a beat later on the escape lane.
       final follow = beat.staggerBombLane;
       if (follow != null && follow != lane) {
         final delayY = -(speed * 0.34).clamp(48.0, 130.0);
-        _spawnLiveItem(
-          type: ItemType.bomb,
-          position: Vector2(_laneX(follow), y + delayY),
-          fallSpeed: speed,
-        );
+        _spawnBombAt(_laneX(follow), y + delayY, speed, paceRatio);
         _lastBombLane = follow;
       }
     }
@@ -856,6 +894,15 @@ class MineRivalsGame extends FlameGame
         _rng.nextDouble() *
             (GameConfig.bombCooldownMax - GameConfig.bombCooldownMin);
     spawnTimer = max(spawnTimer, _bombCooldown * 0.5);
+  }
+
+  void _spawnBombAt(double x, double y, double speed, double paceRatio) {
+    final item = _spawnLiveItem(
+      type: ItemType.bomb,
+      position: Vector2(x, y),
+      fallSpeed: speed,
+    );
+    item.applyBombSpeedScale(paceRatio);
   }
 
   /// Loot: mostly the 3 center rows; sometimes a “bush” near the wall.
@@ -964,6 +1011,86 @@ class MineRivalsGame extends FlameGame
       mistakeStreak <= 1 ? 'Промах! Вор ближе' : 'Вор догоняет!',
       const Color(0xFFFF7043),
     );
+    if (mistakeStreak >= GameConfig.thiefBurstFromMistakes) {
+      _tryStartThiefBurst(fromMistakes: true);
+    }
+  }
+
+  void _scheduleNextBurst() {
+    _nextBurstAt =
+        distance +
+        GameConfig.thiefBurstMetersMin +
+        _rng.nextDouble() *
+            (GameConfig.thiefBurstMetersMax - GameConfig.thiefBurstMetersMin);
+  }
+
+  void _tryStartThiefBurst({bool fromMistakes = false}) {
+    if (finished || inChaseIntro || isThiefBursting) return;
+    if (_thiefBurstCooldown > 0) return;
+    _thiefBurstTimer = GameConfig.thiefBurstDuration;
+    _thiefBurstCooldown = GameConfig.thiefBurstCooldown;
+    _scheduleNextBurst();
+    // Seed a little debt so the sprint always reads on screen.
+    if (_leadDebt < 1.0 && lead.playerLeads) {
+      _leadDebt = min(GameConfig.leadDebtMax, _leadDebt + 1.2);
+    }
+    _pulseBanner(
+      fromMistakes ? 'Вор рванул!' : 'Вор ускорился!',
+      const Color(0xFFEF5350),
+    );
+    add(
+      ScreenFlash(
+        color: const Color(0xFFEF5350),
+        peakAlpha: 0.14,
+        duration: 0.32,
+      ),
+    );
+    _shake(9);
+    audio.play('overtake');
+  }
+
+  void _updateThiefBurst(double dt) {
+    if (_thiefBurstCooldown > 0) {
+      _thiefBurstCooldown = max(0, _thiefBurstCooldown - dt);
+    }
+    if (!inChaseIntro &&
+        !isThiefBursting &&
+        _thiefBurstCooldown <= 0 &&
+        distance >= _nextBurstAt) {
+      _tryStartThiefBurst();
+    }
+    if (_thiefBurstTimer <= 0) return;
+    _thiefBurstTimer = max(0, _thiefBurstTimer - dt);
+    // Hard close while you still lead — rivalry wave.
+    if (lead.playerLeads && !lead.isOvertaking) {
+      lead.applyDelta(-GameConfig.thiefBurstClosePerSec * dt);
+    }
+  }
+
+  void _updateThiefBreath(double dt) {
+    if (_breathBannerCd > 0) {
+      _breathBannerCd = max(0, _breathBannerCd - dt);
+    }
+    final breathing = isThiefBreathing;
+    if (breathing && !_wasBreathing && _breathBannerCd <= 0) {
+      _pulseBanner('Вор дышит в спину!', const Color(0xFFFF8A65));
+      _breathBannerCd = GameConfig.thiefBreathBannerCooldown;
+      _breathFlashTimer = 0;
+    }
+    _wasBreathing = breathing;
+    if (!breathing && !isThiefBursting) return;
+
+    _breathFlashTimer += dt;
+    if (_breathFlashTimer >= GameConfig.thiefBreathFlashEvery) {
+      _breathFlashTimer = 0;
+      add(
+        ScreenFlash(
+          color: const Color(0xFFEF5350),
+          peakAlpha: isThiefBursting ? 0.1 : 0.07,
+          duration: 0.22,
+        ),
+      );
+    }
   }
 
   /// Player ran into a spider web — bomb-like hitch: slow + thief closes in.
@@ -986,7 +1113,9 @@ class MineRivalsGame extends FlameGame
 
   void _updateLeadDebt(double dt) {
     if (_leadDebt <= 0) return;
-    final rate = GameConfig.leadDebtPerSec * (1 + (mistakeStreak - 1) * 0.22);
+    final burst = isThiefBursting ? GameConfig.thiefBurstDebtMult : 1.0;
+    final rate =
+        GameConfig.leadDebtPerSec * (1 + (mistakeStreak - 1) * 0.22) * burst;
     final step = min(_leadDebt, rate * dt);
     _leadDebt -= step;
     lead.applyDelta(-step);
@@ -996,6 +1125,10 @@ class MineRivalsGame extends FlameGame
   void _rewardSuccess(double baseGain, {bool showPullAway = false}) {
     mistakeStreak = 0;
     _leadDebt = 0;
+    // Crystal answer cuts a thief sprint short.
+    if (isThiefBursting) {
+      _thiefBurstTimer = max(0, _thiefBurstTimer - 1.0);
+    }
     successStreak = (successStreak + 1).clamp(1, 8);
     final extra = (successStreak - 1) * GameConfig.successStreakLeadBonus;
     final total = (baseGain + extra).clamp(0.0, 8.0);
@@ -1172,8 +1305,7 @@ class MineRivalsGame extends FlameGame
         ),
       );
     }
-    if (_jewelStreak > 0 &&
-        _jewelStreak % GameConfig.comboThreshold == 0) {
+    if (_jewelStreak > 0 && _jewelStreak % GameConfig.comboThreshold == 0) {
       _rewardSuccess(GameConfig.leadGainOnCombo, showPullAway: true);
       audio.play('combo');
       add(
@@ -1231,9 +1363,7 @@ class MineRivalsGame extends FlameGame
     player.resetSteer();
     audio.play('bomb');
     _shake(16);
-    add(
-      ScreenFlash(color: Colors.black, peakAlpha: 0.35, duration: 0.55),
-    );
+    add(ScreenFlash(color: Colors.black, peakAlpha: 0.35, duration: 0.55));
     _pulseBanner('Яма!', const Color(0xFFEF5350));
     for (final e in List<FallingItem>.of(liveItems)) {
       _releaseLiveItem(e);
@@ -1248,7 +1378,8 @@ class MineRivalsGame extends FlameGame
     final t = Curves.easeInCubic.transform((_pitSuckT / dur).clamp(0.0, 1.0));
     final pit = _pitSuckAt ?? player.position;
     // Pull toward the hole and shrink — “засос”.
-    player.position.x += (pit.x - player.position.x) * (1 - (1 / (1 + 14 * dt)));
+    player.position.x +=
+        (pit.x - player.position.x) * (1 - (1 / (1 + 14 * dt)));
     player.position.y += (pit.y + 8 - player.position.y) * (0.08 + t * 0.55);
     final s = (1.0 - t * 0.92).clamp(0.06, 1.0);
     player.scale = Vector2.all(s);
@@ -1443,6 +1574,15 @@ class MineRivalsGame extends FlameGame
     cleanTimer = 0;
     mistakeStreak = 0;
     _leadDebt = 0;
+    _thiefBurstTimer = 0;
+    _thiefBurstCooldown = 0;
+    _nextBurstAt =
+        GameConfig.thiefBurstMetersMin +
+        _rng.nextDouble() *
+            (GameConfig.thiefBurstMetersMax - GameConfig.thiefBurstMetersMin);
+    _breathFlashTimer = 0;
+    _breathBannerCd = 0;
+    _wasBreathing = false;
     _webSnareTimer = 0;
     _magnetPowerTimer = 0;
     _goldStreak = 0;
@@ -1579,8 +1719,8 @@ class MineRivalsGame extends FlameGame
   @override
   void onDragUpdate(DragUpdateEvent event) {
     // Amplify finger travel so lane swaps in trap combos feel immediate.
-    final gain = GameConfig.playerDragGain *
-        ((inFinale || progress > 0.72) ? 1.06 : 1.0);
+    final gain =
+        GameConfig.steerDragGain * ((inFinale || progress > 0.72) ? 1.06 : 1.0);
     dragX = ((dragX ?? player.position.x) + event.localDelta.x * gain).clamp(
       _pathMinX,
       _pathMaxX,

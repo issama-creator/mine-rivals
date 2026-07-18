@@ -76,6 +76,8 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
           ? GameConfig.jewelDisplaySize * 1.12
           : GameConfig.jewelDisplaySize;
       size = Vector2.all(side);
+    } else if (type.isBomb) {
+      size = Vector2.all(GameConfig.bombDisplaySize);
     }
   }
 
@@ -86,7 +88,17 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
           ? GameConfig.jewelDisplaySize * 1.12
           : GameConfig.jewelDisplaySize;
       size = Vector2.all(side);
+    } else if (type.isBomb) {
+      size = Vector2.all(GameConfig.bombDisplaySize);
     }
+  }
+
+  void applyBombSpeedScale(double paceRatio) {
+    if (!type.isBomb) return;
+    final t = ((paceRatio - 1.0) / 0.9).clamp(0.0, 1.0);
+    final scale = 1.0 +
+        (GameConfig.bombSpeedScaleMax - 1.0) * t;
+    size = Vector2.all(GameConfig.bombDisplaySize * scale);
   }
 
   /// Web/magnet drawn procedurally but Flame still requires a non-null sprite.
@@ -218,11 +230,15 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     }
 
     if (type.isBomb) {
-      final warn = 0.5 + 0.5 * sin(_pulse * 1.55);
+      // Hotter pulse so bombs read at high scroll speed.
+      final warn = 0.55 + 0.45 * sin(_pulse * 2.1);
       final c = Offset(size.x / 2, size.y / 2);
       _glowPaint.color =
-          const Color(0xFFFF1744).withValues(alpha: 0.12 + warn * 0.22);
-      canvas.drawCircle(c, size.x * (0.40 + warn * 0.08), _glowPaint);
+          const Color(0xFFFF1744).withValues(alpha: 0.22 + warn * 0.32);
+      canvas.drawCircle(c, size.x * (0.48 + warn * 0.12), _glowPaint);
+      _glowPaint.color =
+          const Color(0xFFFF9100).withValues(alpha: 0.14 + warn * 0.2);
+      canvas.drawCircle(c, size.x * (0.28 + warn * 0.06), _glowPaint);
     }
 
     // Plain sprite blit — no ColorFilter saveLayer (FPS).

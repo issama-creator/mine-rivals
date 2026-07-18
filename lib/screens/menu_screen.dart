@@ -581,7 +581,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Подстрой звук и эффекты под себя',
+                  'Подстрой звук, эффекты и управление',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.65),
                   ),
@@ -605,6 +605,17 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   value: settings.shakeEnabled,
                   onChanged: (v) {
                     setState(() => settings.shakeEnabled = v);
+                    unawaited(ProgressStore.instance.saveSettings());
+                  },
+                ),
+                const SizedBox(height: 10),
+                _ControlSensitivityTile(
+                  value: settings.controlSensitivity,
+                  onChanged: (v) {
+                    setState(() => settings.controlSensitivity = v);
+                  },
+                  onChangeEnd: (v) {
+                    settings.controlSensitivity = v;
                     unawaited(ProgressStore.instance.saveSettings());
                   },
                 ),
@@ -681,6 +692,97 @@ class _SettingTile extends StatelessWidget {
         activeThumbColor: const Color(0xFF3E2723),
         activeTrackColor: const Color(0xFFFFB300),
         onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+class _ControlSensitivityTile extends StatelessWidget {
+  const _ControlSensitivityTile({
+    required this.value,
+    required this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  final double value;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+
+  String get _label {
+    if (value < 0.2) return 'Очень плавно';
+    if (value < 0.4) return 'Плавно';
+    if (value < 0.7) return 'Нормально';
+    return 'Резко';
+  }
+
+  String get _valueText =>
+      value.clamp(0.0, 1.0).toStringAsFixed(2).replaceAll('.', ',');
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.swipe_rounded, color: Color(0xFFFFE082)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Чувствительность',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$_label · $_valueText',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                _valueText,
+                style: const TextStyle(
+                  color: Color(0xFFFFE082),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 18,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: const Color(0xFFFFB300),
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.12),
+              thumbColor: const Color(0xFFFFE082),
+              overlayColor: const Color(0xFFFFB300).withValues(alpha: 0.18),
+              trackHeight: 4,
+            ),
+            child: Slider(
+              value: value.clamp(0.0, 1.0),
+              divisions: 20,
+              onChanged: onChanged,
+              onChangeEnd: onChangeEnd,
+            ),
+          ),
+        ],
       ),
     );
   }

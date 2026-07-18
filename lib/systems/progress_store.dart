@@ -19,6 +19,8 @@ class ProgressStore {
   static const _kLastPerfect = 'last_perfect_day';
   static const _kSound = 'sound_enabled';
   static const _kShake = 'shake_enabled';
+  static const _kControlFeel = 'control_feel'; // legacy string
+  static const _kControlSensitivity = 'control_sensitivity';
 
   SharedPreferences? _prefs;
 
@@ -46,6 +48,8 @@ class ProgressStore {
 
     GameSettings.instance.soundEnabled = p.getBool(_kSound) ?? true;
     GameSettings.instance.shakeEnabled = p.getBool(_kShake) ?? true;
+    GameSettings.instance.controlSensitivity =
+        _loadControlSensitivity(p);
 
     unlockedSkins
       ..clear()
@@ -98,6 +102,24 @@ class ProgressStore {
     if (p == null) return;
     await p.setBool(_kSound, GameSettings.instance.soundEnabled);
     await p.setBool(_kShake, GameSettings.instance.shakeEnabled);
+    await p.setDouble(
+      _kControlSensitivity,
+      GameSettings.instance.controlSensitivity.clamp(0.0, 1.0),
+    );
+  }
+
+  double _loadControlSensitivity(SharedPreferences p) {
+    final saved = p.getDouble(_kControlSensitivity);
+    if (saved != null) return saved.clamp(0.0, 1.0);
+    // Migrate old Плавно/Резко chips.
+    switch (p.getString(_kControlFeel)) {
+      case 'sharp':
+        return 1.0;
+      case 'smooth':
+        return 0.0;
+      default:
+        return 0.35;
+    }
   }
 
   Future<void> _saveUnlocks() async {

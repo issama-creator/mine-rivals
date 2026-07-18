@@ -47,34 +47,34 @@ class GameConfig {
     return 1.0 + t * 1.25;
   }
 
-  /// Start with a clear ~5 m gap; clean play caps around there.
-  static const double startLeadDistance = 4.0;
-  static const double maxLeadDistance = 5.0;
-  /// Thief can pull up to ~10 m ahead on a long mistake streak (was 5).
+  /// Hot chase — ~15% easier than first rivalry pass (thief less oppressive).
+  static const double startLeadDistance = 3.7;
+  static const double maxLeadDistance = 4.0;
+  /// Thief can pull up to ~10 m ahead on a long mistake streak.
   static const double minLeadDistance = -10.0;
 
   /// Coins never push lead (columns are free score). Lead is jewel/mistake based.
   static const double leadGainOnCatch = 0.0;
   /// Jewels are the contested prize — catching them opens the gap.
-  static const double leadGainOnRare = 1.8;
-  static const double leadGainOnCombo = 1.2;
+  static const double leadGainOnRare = 2.07;
+  static const double leadGainOnCombo = 1.38;
   /// Extra lead meters added for each jewel catch in a success streak.
-  static const double successStreakLeadBonus = 0.4;
+  static const double successStreakLeadBonus = 0.46;
   /// Miss a coin — thief closes in (the real chase pressure).
-  static const double leadLossOnMiss = 1.05;
-  static const double leadLossOnMissRare = 1.55;
-  static const double leadLossOnBomb = 1.25;
-  static const double leadLossPerMistakeStreak = 0.45;
+  static const double leadLossOnMiss = 1.06;
+  static const double leadLossOnMissRare = 1.49;
+  static const double leadLossOnBomb = 1.23;
+  static const double leadLossPerMistakeStreak = 0.47;
   /// How fast pending chase debt drains into real lead (m/s).
-  static const double leadDebtPerSec = 1.2;
+  static const double leadDebtPerSec = 1.40;
   /// Enough debt to push thief toward the full −10 m gap.
-  static const double leadDebtMax = 9.0;
+  static const double leadDebtMax = 7.2;
   /// Slow recover only while playing clean (no misses).
-  static const double leadRecoverPerSec = 0.14;
+  static const double leadRecoverPerSec = 0.092;
   /// How fast the thief eases when you pull ahead (goes back).
   static const double leadVisualFollow = 1.35;
   /// How fast he eases when closing after your mistakes (slow approach).
-  static const double leadVisualFollowMistake = 0.72;
+  static const double leadVisualFollowMistake = 0.81;
   /// Extra smoothing on thief screen Y (kills leftover hops).
   static const double thiefYSmooth = 4.2;
   static const double thiefScaleSmooth = 5.0;
@@ -83,8 +83,28 @@ class GameConfig {
   /// Thief takes the lead after a blunder — slow glide past you.
   static const double overtakeSprintDuration = 1.9;
   /// Show faint chase arrow once the thief is this far behind.
-  static const double chaseArrowLeadMin = 2.6;
+  static const double chaseArrowLeadMin = 2.2;
   static const int comboThreshold = 8;
+
+  // ── Thief momentum bursts (rivalry waves) — ~15% softer / rarer ───────────
+  static const double thiefBurstDuration = 2.2;
+  static const double thiefBurstMetersMin = 98;
+  static const double thiefBurstMetersMax = 138;
+  /// Extra closing speed while bursting (on top of debt drain).
+  static const double thiefBurstClosePerSec = 1.15;
+  /// Debt drain multiplier during a burst.
+  static const double thiefBurstDebtMult = 1.45;
+  /// Mistake streak that can trigger an early burst.
+  static const int thiefBurstFromMistakes = 2;
+  static const double thiefBurstCooldown = 16;
+  /// Stronger steal vacuum while bursting.
+  static const double thiefBurstMagnetRadius = 128;
+  static const double thiefBurstMagnetPullSpeed = 264;
+
+  // ── “Breathing down your neck” juice ─────────────────────────────────────
+  static const double thiefBreathLeadMax = 1.28;
+  static const double thiefBreathFlashEvery = 1.35;
+  static const double thiefBreathBannerCooldown = 5.2;
 
   static const double itemFallSpeedMin = 160;
   static const double itemFallSpeedMax = 280;
@@ -112,6 +132,27 @@ class GameConfig {
   /// Body lean while strafing (radians at full speed).
   static const double playerSteerLean = 0.08;
 
+  /// 0 = очень плавно, 1 = резко ([GameSettings.controlSensitivity]).
+  static double get steerFeel =>
+      GameSettings.instance.controlSensitivity.clamp(0.0, 1.0);
+
+  /// Lerp from soft floor → sharp ceiling (left end is softer than old “base”).
+  static double _steerLerp(double soft, double sharp) =>
+      soft + (sharp - soft) * steerFeel;
+
+  static double get steerSpeed =>
+      playerSteerSpeed * _steerLerp(0.55, 1.45);
+  static double get steerAccel =>
+      playerSteerAccel * _steerLerp(0.48, 1.7);
+  static double get steerMaxSpeed =>
+      playerSteerMaxSpeed * _steerLerp(0.62, 1.35);
+  static double get steerDragGain =>
+      playerDragGain * _steerLerp(0.82, 1.22);
+  static double get steerFinaleBoost =>
+      playerSteerFinaleBoost * _steerLerp(0.92, 1.12);
+  static double get steerLean =>
+      playerSteerLean * _steerLerp(0.7, 1.35);
+
   /// Soft depth for the trailing thief only — hero never uses far shrink.
   static const double depthScaleNear = 1.0;
   static const double depthScaleFar = 0.72;
@@ -138,7 +179,10 @@ class GameConfig {
   /// Falling loot sizes — jewels share one square so corridor crops look even.
   static const double jewelDisplaySize = 48;
   static const double lootDisplaySize = 38;
-  static const double bombDisplaySize = 46;
+  /// Base bomb size — scaled up further at high run pace in-game.
+  static const double bombDisplaySize = 54;
+  /// Extra bomb scale at full pace (1 = base, 1.22 = +22% when fast).
+  static const double bombSpeedScaleMax = 1.22;
 
   static const double magnetRadius = 16;
   static const double magnetPullSpeed = 45;
@@ -179,7 +223,7 @@ class GameConfig {
   /// World + stride slow while snared (bomb-like hitch, a bit softer).
   static const double webSnarePlayRate = 0.55;
   /// Chase pressure — close to a bomb, but no crystal loss.
-  static const double leadLossOnWeb = 1.0;
+  static const double leadLossOnWeb = 1.02;
 
   /// Three dodge lanes — always at least one clear row to slip through.
   static const int bombLaneCount = 3;
@@ -228,14 +272,16 @@ class GameConfig {
   static const double cameraThiefFarYFactor = 1.05;
   /// How high up the shaft the thief can go when crushing you.
   static const double cameraThiefAheadYFactor = 0.56;
-  /// At high run speed, ease the runner band down a bit so more path is visible.
-  /// Extra screen-height fraction (0.055 ≈ mild look-ahead, not a hard tilt).
-  static const double cameraSpeedDipMax = 0.055;
+  /// At high run speed, drop the runner band so more path is visible ahead.
+  /// ~11% of screen — readable look-ahead, still not a hard tilt.
+  static const double cameraSpeedDipMax = 0.11;
   /// Pace ratio (vs start) where the dip begins / reaches full.
-  static const double cameraSpeedDipFrom = 1.12;
-  static const double cameraSpeedDipFull = 2.0;
+  static const double cameraSpeedDipFrom = 1.0;
+  static const double cameraSpeedDipFull = 1.75;
   /// How fast the camera eases into the speed dip.
-  static const double cameraSpeedDipFollow = 3.2;
+  static const double cameraSpeedDipFollow = 4.5;
+  /// Spawn bombs this many extra px above the top when pace is high.
+  static const double bombSpawnLeadPxMax = 72;
   static const double leadCloseGapPx = 48;
   /// Mild shrink when thief is deep ahead up the corridor.
   static const double thiefAheadScale = 0.72;

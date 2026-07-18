@@ -69,21 +69,26 @@ class PlayerComponent extends SpriteAnimationComponent {
     double minX,
     double maxX,
     double dt, {
-    double speed = GameConfig.playerSteerSpeed,
+    double? speed,
   }) {
+    final steerSp = speed ?? GameConfig.steerSpeed;
     targetX = x.clamp(minX, maxX);
     final err = targetX - position.x;
     final gap = err.abs();
+    final feel = GameConfig.steerFeel;
 
     // Near target: settle gently. Far: a bit more intent for escapes.
-    final intent = speed * (gap > 48 ? 1.12 : (gap > 18 ? 0.98 : 0.72));
+    // Low feel = softer glide (slider left goes below old “плавно”).
+    final farIntent = 0.92 + 0.36 * feel;
+    final midIntent = 0.78 + 0.32 * feel;
+    final nearIntent = 0.52 + 0.36 * feel;
+    final intent = steerSp *
+        (gap > 48 ? farIntent : (gap > 18 ? midIntent : nearIntent));
     final desiredVx = err * intent;
-    final maxSp = GameConfig.playerSteerMaxSpeed *
-        (gap > 56 ? 1.05 : 1.0);
+    final maxSp = GameConfig.steerMaxSpeed * (gap > 56 ? 1.05 : 1.0);
 
     // Ease velocity — this is what makes strafes feel “nice”.
-    final blend =
-        1 - (1 / (1 + GameConfig.playerSteerAccel * dt));
+    final blend = 1 - (1 / (1 + GameConfig.steerAccel * dt));
     _steerVx += (desiredVx - _steerVx) * blend;
     _steerVx = _steerVx.clamp(-maxSp, maxSp);
 
@@ -99,14 +104,17 @@ class PlayerComponent extends SpriteAnimationComponent {
     }
 
     // Micro-settle so he doesn't jitter on the finger.
-    if (gap < 2.0 && _steerVx.abs() < 18) {
+    final settleGap = 2.8 - 1.6 * feel;
+    final settleVx = 14.0 + 14.0 * feel;
+    if (gap < settleGap && _steerVx.abs() < settleVx) {
       position.x = targetX;
-      _steerVx *= 0.28;
+      _steerVx *= 0.18 + 0.27 * feel;
     }
 
     // Light lean into the dodge — sells the left/right move.
-    final leanTarget = (_steerVx / maxSp) * GameConfig.playerSteerLean;
-    angle += (leanTarget - angle) * (1 - (1 / (1 + 7.5 * dt)));
+    final leanTarget = (_steerVx / maxSp) * GameConfig.steerLean;
+    final leanFollow = 5.2 + 6.8 * feel;
+    angle += (leanTarget - angle) * (1 - (1 / (1 + leanFollow * dt)));
   }
 
   void applyDepthScale(double scale, [double dt = 1 / 60]) {

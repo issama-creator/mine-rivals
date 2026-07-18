@@ -33,6 +33,8 @@ class _HudOverlayState extends State<HudOverlay> {
   int _lastShaft = -1;
   int _lastMagnetSec = -1;
   bool _lastYouLead = true;
+  bool _lastBurst = false;
+  bool _lastBreath = false;
   String? _lastBanner;
 
   @override
@@ -54,6 +56,8 @@ class _HudOverlayState extends State<HudOverlay> {
       final lead = g.lead.logicalLeader == Leader.player;
       final banner = g.bannerText;
       final magnetSec = g.magnetPowerSeconds.ceil();
+      final burst = g.isThiefBursting;
+      final breath = g.isThiefBreathing;
       if (you == _lastYou &&
           thief == _lastThief &&
           run == _lastRun &&
@@ -63,7 +67,9 @@ class _HudOverlayState extends State<HudOverlay> {
           shaft == _lastShaft &&
           lead == _lastYouLead &&
           banner == _lastBanner &&
-          magnetSec == _lastMagnetSec) {
+          magnetSec == _lastMagnetSec &&
+          burst == _lastBurst &&
+          breath == _lastBreath) {
         return;
       }
       _lastYou = you;
@@ -76,6 +82,8 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastYouLead = lead;
       _lastBanner = banner;
       _lastMagnetSec = magnetSec;
+      _lastBurst = burst;
+      _lastBreath = breath;
       setState(() {});
     });
   }
@@ -343,6 +351,19 @@ class _HudOverlayState extends State<HudOverlay> {
                 child: _toast(
                   'Магнит ${game.magnetPowerSeconds.ceil()}с',
                   const Color(0xFF29B6F6),
+                ),
+              ),
+            ] else if (game.isThiefBursting) ...[
+              const SizedBox(height: 6),
+              IgnorePointer(
+                child: _toast('Вор рванул!', const Color(0xFFEF5350)),
+              ),
+            ] else if (game.isThiefBreathing) ...[
+              const SizedBox(height: 6),
+              IgnorePointer(
+                child: _toast(
+                  'Вор дышит в спину!',
+                  const Color(0xFFFF8A65),
                 ),
               ),
             ] else if (game.bannerText != null) ...[

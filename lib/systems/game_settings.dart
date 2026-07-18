@@ -6,6 +6,9 @@ class GameSettings {
   bool soundEnabled = true;
   bool shakeEnabled = true;
 
+  /// Lane steer sensitivity — 0 = плавно, 1 = резко.
+  double controlSensitivity = 0.35;
+
   /// Selected miner skin id — see [PlayerSkins].
   String selectedSkinId = 'player';
 
