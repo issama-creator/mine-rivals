@@ -66,8 +66,7 @@ flutter:
     - assets/audio/
     - assets/images/bgc/
     - assets/images/kristales/crops/
-    - assets/images/hazards/dynamite_cart.png
-    - assets/images/hazards/spikes.png
+    - assets/images/hazards/
     - assets/images/vors/
     # Skins — listed explicitly (directory entries can miss on some rebuilds).
     - assets/images/skins/player.png

@@ -264,9 +264,21 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       } catch (e2, st2) {
         // ignore: avoid_print
         print('Asset boot failed: $e2\n$st2');
-        // Stay on loading rather than an unhandled zone throw / debugger pause.
-        return;
+        // Last resort — do not hang forever on GameLoadingScreen.
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        try {
+          await AssetLibrary.ensureLoaded(prefetchRest: false);
+        } catch (e3, st3) {
+          // ignore: avoid_print
+          print('Asset boot aborted: $e3\n$st3');
+          return;
+        }
       }
+    }
+    if (!AssetLibrary.ready) {
+      // ignore: avoid_print
+      print('AssetLibrary not ready after boot — aborting onLoad');
+      return;
     }
     _dailyMissions = DailyMissions.forToday();
     _missionToasted.clear();

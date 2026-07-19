@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flame/components.dart';
@@ -46,7 +47,7 @@ class AssetLibrary {
 
   /// Per corridor: gems for that shaft.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 57;
+  static const int _assetVersion = 58;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
@@ -253,13 +254,18 @@ class AssetLibrary {
 
   static Future<void> _loadHazardOrFallback(ItemType type, String path) async {
     ui.Image? img;
-    // rootBundle first — reliable after pubspec asset adds (stale Flame cache).
+    // Bounded decode — oversized hazard PNGs used to ANR the loading screen.
     try {
-      final data = await rootBundle.load(path);
+      final data = await rootBundle
+          .load(path)
+          .timeout(const Duration(seconds: 5));
       final bytes = Uint8List.sublistView(data);
-      final completer = Completer<ui.Image>();
-      ui.decodeImageFromList(bytes, completer.complete);
-      img = await completer.future;
+      final codec = await ui
+          .instantiateImageCodec(bytes, targetWidth: 256)
+          .timeout(const Duration(seconds: 5));
+      final frame =
+          await codec.getNextFrame().timeout(const Duration(seconds: 5));
+      img = frame.image;
       try {
         Flame.images.add(path, img);
       } catch (_) {}
