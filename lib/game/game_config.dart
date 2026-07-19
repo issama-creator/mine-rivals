@@ -302,6 +302,9 @@ class GameConfig {
   static const double teachComboUnlockMeters = 200;
   /// One series round → checkpoint (cash out or risk next round).
   static const double seriesRoundMeters = 500;
+  /// After 3–2–1: brief invuln + soft pace so resume isn't instant death.
+  static const double roundResumeGraceSec = 2.1;
+  static const double roundResumePlayRate = 0.42;
   /// Alias used by older call sites.
   static const double finishCheckpointMeters = seriesRoundMeters;
 

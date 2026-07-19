@@ -12,6 +12,7 @@ import '../systems/shop_catalog.dart';
 import '../ui/game_loading_screen.dart';
 import '../ui/hud_overlay.dart';
 import '../ui/checkpoint_overlay.dart';
+import '../ui/countdown_overlay.dart';
 import '../ui/results_overlay.dart';
 import '../ui/shop_sheet.dart';
 import '../ui/tutorial_overlay.dart';
@@ -1612,6 +1613,8 @@ class _GameScreenState extends State<GameScreen> {
           'tutorial': (context, MineRivalsGame g) => TutorialOverlay(game: g),
           'checkpoint': (context, MineRivalsGame g) =>
               CheckpointOverlay(game: g),
+          'countdown': (context, MineRivalsGame g) =>
+              CountdownOverlay(game: g),
         },
         initialActiveOverlays: const ['hud'],
       ),

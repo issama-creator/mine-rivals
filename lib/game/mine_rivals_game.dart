@@ -203,6 +203,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   /// Next distance where Finish vs Risk is offered (or thief claims).
   double _nextCheckpointM = GameConfig.seriesRoundMeters;
   bool _checkpointOpen = false;
+  /// Soft start after checkpoint risk (3–2–1).
+  bool _roundCountdownOpen = false;
+  double _roundGraceTimer = 0;
   bool _taughtMagnet = false;
   bool _taughtHeart = false;
   bool _taughtPotion = false;
@@ -473,6 +476,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (_webSnareTimer > 0) _webSnareTimer -= dt;
     if (_magnetPowerTimer > 0) _magnetPowerTimer -= dt;
     if (_heartIFrame > 0) _heartIFrame -= dt;
+    if (_roundGraceTimer > 0) _roundGraceTimer -= dt;
     if (_potionBoostTimer > 0) {
       _potionBoostTimer -= dt;
       // Keep pushing the gap open for the boost window.
@@ -482,6 +486,14 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
 
     var targetRate = inFinale ? GameConfig.finalePlayRate : 1.0;
+    // Soft ramp after checkpoint countdown — don't slam into full pace.
+    if (_roundGraceTimer > 0) {
+      final t = 1.0 -
+          (_roundGraceTimer / GameConfig.roundResumeGraceSec).clamp(0.0, 1.0);
+      final soft = GameConfig.roundResumePlayRate +
+          (1.0 - GameConfig.roundResumePlayRate) * Curves.easeOutCubic.transform(t);
+      targetRate = min(targetRate, soft);
+    }
     // Whole snare window: world slows so the thief visibly closes in.
     if (_webSnareTimer > 0) {
       targetRate = min(targetRate, GameConfig.webSnarePlayRate);
@@ -502,7 +514,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _syncCorridorTheme();
     _syncExtraThieves();
     _updateFinishCheckpoints();
-    if (_checkpointOpen || finished) return;
+    if (_checkpointOpen || _roundCountdownOpen || finished) return;
 
     _updateThiefBurst(step);
     _updateLeadDebt(step);
@@ -745,8 +757,8 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       // Hazards never magnetize — strict touch only.
       if (item.type.isHazard) {
         item.setPlayerMagnet(false);
-        // Brief invuln after heart save (explosives / floor traps — web still sticks).
-        if (_heartIFrame > 0 &&
+        // Brief invuln after heart save / round resume (explosives / floor traps).
+        if ((_heartIFrame > 0 || _roundGraceTimer > 0) &&
             (item.type.isExplosive || item.type.isLethalFloor)) {
           continue;
         }
@@ -1963,19 +1975,50 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     endRunEarly(asVictory: true);
   }
 
-  /// Risk the next round — thief may close the series if he leads there.
+  /// Risk the next round — 3–2–1 then soft resume (thief may close later).
   void riskCheckpointContinue() {
     if (!_checkpointOpen || finished || isFinalSeriesRound) return;
     overlays.remove('checkpoint');
     _checkpointOpen = false;
     seriesRound += 1;
     _nextCheckpointM += GameConfig.seriesRoundMeters;
+    _roundCountdownOpen = true;
+    // Stay paused during countdown overlay.
+    pauseEngine();
+    overlays.add('countdown');
+  }
+
+  /// Called by countdown overlay when 3–2–1 finishes.
+  void finishRoundCountdown() {
+    if (!_roundCountdownOpen || finished) return;
+    overlays.remove('countdown');
+    _roundCountdownOpen = false;
+    _softResumeAfterCheckpoint();
+  }
+
+  /// Clear nearby lethals, brief grace, ease pace back in.
+  void _softResumeAfterCheckpoint() {
+    _clearHazardsNearPlayer();
+    _roundGraceTimer = GameConfig.roundResumeGraceSec;
+    _playRate = GameConfig.roundResumePlayRate;
     _pulseBanner(
       'Раунд $seriesRound/$seriesRounds',
       const Color(0xFFFFB300),
     );
     if (!finished && !_pitSucking) {
       resumeEngine();
+    }
+  }
+
+  void _clearHazardsNearPlayer() {
+    final py = player.position.y;
+    for (final e in List<FallingItem>.of(liveItems)) {
+      if (e.collected || e.stolen) continue;
+      if (!e.type.isHazard) continue;
+      // Drop traps already underfoot / just ahead so resume isn't a free death.
+      if (e.position.y > py - 220 && e.position.y < py + 90) {
+        _releaseLiveItem(e);
+      }
     }
   }
 
@@ -2147,12 +2190,22 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
   /// Pause for in-run menu sheet.
   void pauseForMenu() {
-    if (finished || _finishBeat || _checkpointOpen) return;
+    if (finished ||
+        _finishBeat ||
+        _checkpointOpen ||
+        _roundCountdownOpen) {
+      return;
+    }
     pauseEngine();
   }
 
   void resumeFromMenu() {
-    if (finished || _finishBeat || _checkpointOpen) return;
+    if (finished ||
+        _finishBeat ||
+        _checkpointOpen ||
+        _roundCountdownOpen) {
+      return;
+    }
     resumeEngine();
   }
 
@@ -2167,7 +2220,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     finishedByThiefChoice = false;
     if (!asVictory) finishedSeriesComplete = false;
     _checkpointOpen = false;
+    _roundCountdownOpen = false;
+    _roundGraceTimer = 0;
     overlays.remove('checkpoint');
+    overlays.remove('countdown');
     _thiefEscapeTimer = 0;
     _finishBeat = false;
     _webSnareTimer = 0;
@@ -2184,6 +2240,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     overlays.remove('results');
     overlays.remove('pause');
     overlays.remove('checkpoint');
+    overlays.remove('countdown');
     for (final e in List<FallingItem>.of(liveItems)) {
       _releaseLiveItem(e);
     }
@@ -2288,6 +2345,8 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     seriesRound = 1;
     _nextCheckpointM = GameConfig.seriesRoundMeters;
     _checkpointOpen = false;
+    _roundCountdownOpen = false;
+    _roundGraceTimer = 0;
     lastRunXpGain = 0;
     lastRunCrystalsGain = 0;
     lastRunCrystalsBurned = false;
