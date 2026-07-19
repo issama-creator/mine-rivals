@@ -93,6 +93,31 @@ class MineRivalsGame extends FlameGame
 
   double get magnetPowerSeconds => _magnetPowerTimer;
 
+  /// Subway-style key — absorbs one bomb / pit.
+  bool hasHeart = false;
+  /// Answer the thief — tap HUD when he leads / breathes.
+  bool hasPotion = false;
+  double _potionBoostTimer = 0;
+  double _heartIFrame = 0;
+
+  bool get isPotionBoosting => _potionBoostTimer > 0;
+
+  bool get canUsePotion =>
+      hasPotion &&
+      !isPotionBoosting &&
+      !finished &&
+      !_finishBeat &&
+      !inChaseIntro &&
+      (!lead.playerLeads ||
+          lead.leadDistance.abs() <= GameConfig.potionUseLeadMax);
+
+  int playerOvertakes = 0;
+  int thiefOvertakes = 0;
+  /// Crystals caught while the player leads (daily race mission).
+  int raresWhileLeading = 0;
+  bool newDistanceRecord = false;
+  bool newRaresRecord = false;
+
   /// Coin streak for catch pitch-up / ×2×3 mult / gold trail.
   int _goldStreak = 0;
   int _lastCoinMult = 1;
@@ -213,6 +238,7 @@ class MineRivalsGame extends FlameGame
       add(DustPuff(position: mid.clone()));
       add(DustPuff(position: mid + Vector2(16 * thief.passSide, 8)));
       if (leader == Leader.thief) {
+        thiefOvertakes++;
         _pulseBanner('Вор впереди', const Color(0xFFEF5350));
         add(
           ScreenFlash(
@@ -223,6 +249,7 @@ class MineRivalsGame extends FlameGame
         );
         _shake(14);
       } else {
+        playerOvertakes++;
         _pulseBanner('Ты впереди', const Color(0xFF66BB6A));
         add(
           ScreenFlash(
@@ -243,6 +270,10 @@ class MineRivalsGame extends FlameGame
     _layoutActors();
     _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
     started = true;
+    if (!ProgressStore.instance.tutorialSeen) {
+      overlays.add('tutorial');
+      pauseEngine();
+    }
   }
 
   @override
@@ -329,6 +360,14 @@ class MineRivalsGame extends FlameGame
 
     if (_webSnareTimer > 0) _webSnareTimer -= dt;
     if (_magnetPowerTimer > 0) _magnetPowerTimer -= dt;
+    if (_heartIFrame > 0) _heartIFrame -= dt;
+    if (_potionBoostTimer > 0) {
+      _potionBoostTimer -= dt;
+      // Keep pushing the gap open for the boost window.
+      if (lead.leadDistance < GameConfig.maxLeadDistance) {
+        lead.applyDelta(GameConfig.potionLeadGain * 0.35 * dt);
+      }
+    }
 
     var targetRate = inFinale ? GameConfig.finalePlayRate : 1.0;
     // Whole snare window: world slows so the thief visibly closes in.
@@ -422,8 +461,9 @@ class MineRivalsGame extends FlameGame
         isThiefBreathing ||
         (lead.playerLeads &&
             lead.leadDistance.abs() < GameConfig.thiefBreathLeadMax + 0.4);
-    final sprinting =
-        isThiefBursting || (lead.isOvertaking && lead.sprintOvertake);
+    final sprinting = isPotionBoosting ||
+        isThiefBursting ||
+        (lead.isOvertaking && lead.sprintOvertake);
     for (final t in _pack) {
       t.runLane(
         screenCenterX: size.x * 0.5,
@@ -478,6 +518,9 @@ class MineRivalsGame extends FlameGame
       distance: distance,
       gold: stats.player.gold,
       rares: stats.player.rareTotal,
+      overtakes: playerOvertakes,
+      raresWhileLeading: raresWhileLeading,
+      won: false, // win only resolves at run end
       missions: _dailyMissions,
       alreadyToasted: _missionToasted,
     );
@@ -491,10 +534,31 @@ class MineRivalsGame extends FlameGame
   Future<void> _commitDailyProgress() async {
     if (_dailyCommitted) return;
     _dailyCommitted = true;
-    final result = await ProgressStore.instance.applyRunProgress(
+    final distM = distance.round();
+    final rares = stats.player.rareTotal;
+    final store = ProgressStore.instance;
+    // Flags + in-memory bests update before first await (ResultsOverlay).
+    newDistanceRecord = distM > store.bestDistanceMeters;
+    newRaresRecord = rares > store.bestRares;
+    if (newDistanceRecord || newRaresRecord) {
+      final parts = <String>[
+        if (newDistanceRecord) 'дистанция',
+        if (newRaresRecord) 'кристаллы',
+      ];
+      _pulseBanner('Рекорд: ${parts.join(' · ')}!', const Color(0xFFFFD54F));
+    }
+    final won = !failedRun && stats.playerWins;
+    final records = await store.considerRecords(
+      distanceMeters: distM,
+      rares: rares,
+    );
+    final result = await store.applyRunProgress(
       distance: distance,
       gold: stats.player.gold,
-      rares: stats.player.rareTotal,
+      rares: rares,
+      overtakes: playerOvertakes,
+      raresWhileLeading: raresWhileLeading,
+      won: won,
       missions: _dailyMissions,
     );
     for (final m in _dailyMissions) {
@@ -504,7 +568,10 @@ class MineRivalsGame extends FlameGame
         _pulseBanner('✓ ${m.titleRu}', const Color(0xFF81C784));
       }
     }
-    for (final skinName in result.skins) {
+    if (result.weekly) {
+      _pulseBanner('Неделя закрыта!', const Color(0xFFFFD54F));
+    }
+    for (final skinName in {...records.skins, ...result.skins}) {
       _pulseBanner('Новый скин: $skinName!', const Color(0xFFFFD54F));
       audio.play('rare');
     }
@@ -571,15 +638,23 @@ class MineRivalsGame extends FlameGame
       // Hazards never magnetize — strict touch only.
       if (item.type.isHazard) {
         item.setPlayerMagnet(false);
-        if (item.type.isPit) {
-          // Pit checks feet on the path, not the basket.
+        // Brief invuln after heart save (explosives / floor traps — web still sticks).
+        if (_heartIFrame > 0 &&
+            (item.type.isExplosive || item.type.isLethalFloor)) {
+          continue;
+        }
+        if (item.type.isLethalFloor) {
+          // Pit / spikes check feet on the path, not the basket.
           final feet = Vector2(player.position.x, player.position.y - 10);
-          if ((feet - item.position).length <= GameConfig.pitCatchRadius) {
+          final radius = item.type.isSpikes
+              ? GameConfig.spikesCatchRadius
+              : GameConfig.pitCatchRadius;
+          if ((feet - item.position).length <= radius) {
             onItemCaught(item);
           }
         } else {
           final dist = (basket - item.position).length;
-          final radius = item.type.isBomb
+          final radius = item.type.isExplosive
               ? GameConfig.bombCatchRadius
               : GameConfig.webCatchRadius;
           if (dist <= radius) {
@@ -746,8 +821,8 @@ class MineRivalsGame extends FlameGame
     // Empty corridor beat — teach “challenge incoming” before bomb gates.
     if (beat.silence) return;
 
-    if (beat.bombPattern || beat.type.isBomb) {
-      final bombLive = liveItems.any((e) => e.type.isBomb);
+    if (beat.bombPattern || beat.type.isExplosive) {
+      final bombLive = liveItems.any((e) => e.type.isExplosive);
       if (bombLive || _bombCooldown > 0) {
         final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
         _spawnLiveItem(
@@ -761,12 +836,26 @@ class MineRivalsGame extends FlameGame
       return;
     }
 
-    // Pit beat — black hole on a lane.
-    if (beat.type.isPit) {
+    // Pit / spikes beat — lethal floor on a lane.
+    if (beat.type.isLethalFloor) {
+      final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
+      final type = beat.type.isSpikes ||
+              _rng.nextDouble() < GameConfig.spikesChanceAt(progress)
+          ? ItemType.spikes
+          : ItemType.pit;
+      _spawnLiveItem(
+        type: type,
+        position: Vector2(_laneX(lane), -48),
+        fallSpeed: background.speed,
+      );
+      return;
+    }
+
+    if (beat.type.isHeart || beat.type.isPotion) {
       final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
       _spawnLiveItem(
-        type: ItemType.pit,
-        position: Vector2(_laneX(lane), -48),
+        type: beat.type,
+        position: Vector2(_laneX(lane), -40),
         fallSpeed: background.speed,
       );
       return;
@@ -786,8 +875,10 @@ class MineRivalsGame extends FlameGame
     // Spider web — rare interrupt (never replaces magnet / row / pit / web).
     final level = background.corridorIndex + 1;
     if (!beat.type.isMagnet &&
-        !beat.type.isPit &&
+        !beat.type.isLethalFloor &&
         !beat.type.isWeb &&
+        !beat.type.isHeart &&
+        !beat.type.isPotion &&
         !beat.row &&
         level >= GameConfig.webFromCorridor &&
         _rng.nextDouble() < GameConfig.webSpawnChance &&
@@ -897,8 +988,11 @@ class MineRivalsGame extends FlameGame
   }
 
   void _spawnBombAt(double x, double y, double speed, double paceRatio) {
+    final type = _rng.nextDouble() < GameConfig.dynamiteCartChance
+        ? ItemType.dynamiteCart
+        : ItemType.bomb;
     final item = _spawnLiveItem(
-      type: ItemType.bomb,
+      type: type,
       position: Vector2(x, y),
       fallSpeed: speed,
     );
@@ -1144,28 +1238,43 @@ class MineRivalsGame extends FlameGame
     // Non-jewels always go to the player — never redirected to thief.
     if (!item.type.isJewel) {
       item.collected = true;
-      if (item.type.isBomb) {
+      if (item.type.isExplosive) {
         _breakCoinCombo();
         _breakJewelCombo();
+        if (_tryConsumeHeart(item.position.clone())) {
+          _releaseLiveItem(item);
+          return;
+        }
         stats.player.registerCatch(isBomb: true);
         final lostCrystal = stats.player.loseOneRare();
         cleanTimer = 0;
-        _punishMistake(GameConfig.leadLossOnBomb);
+        final leadLoss = item.type.isDynamiteCart
+            ? GameConfig.leadLossOnDynamiteCart
+            : GameConfig.leadLossOnBomb;
+        _punishMistake(leadLoss);
         audio.play('bomb');
         add(
-          ParticleBurst(position: item.position.clone(), color: Colors.orange),
+          ParticleBurst(
+            position: item.position.clone(),
+            color: item.type.isDynamiteCart
+                ? const Color(0xFFFF6D00)
+                : Colors.orange,
+            count: item.type.isDynamiteCart ? 16 : 10,
+          ),
         );
         add(
           ScreenFlash(
             color: const Color(0xFFFF6D00),
-            peakAlpha: 0.16,
+            peakAlpha: item.type.isDynamiteCart ? 0.22 : 0.16,
             duration: 0.32,
           ),
         );
-        _shake(14);
+        _shake(item.type.isDynamiteCart ? 18 : 14);
         add(
           FloatingText(
-            text: lostCrystal ? '−1' : 'Бум!',
+            text: lostCrystal
+                ? '−1'
+                : (item.type.isDynamiteCart ? 'Вагонетка!' : 'Бум!'),
             position: item.position.clone(),
             color: lostCrystal ? const Color(0xFFFF5252) : Colors.orangeAccent,
           ),
@@ -1196,10 +1305,71 @@ class MineRivalsGame extends FlameGame
         return;
       }
 
-      if (item.type.isPit) {
+      if (item.type.isLethalFloor) {
         final at = item.position.clone();
+        final spikes = item.type.isSpikes;
         _releaseLiveItem(item);
+        if (_tryConsumeHeart(at)) return;
+        if (spikes) {
+          _pulseBanner('Шипы!', const Color(0xFFFF8A65));
+        }
         _failRunPit(at);
+        return;
+      }
+
+      if (item.type.isHeart) {
+        if (!hasHeart) {
+          hasHeart = true;
+          _pulseBanner('Сердце!', const Color(0xFFFF5252));
+          audio.play('rare');
+        } else {
+          _pulseBanner('Уже есть!', const Color(0xFFFFAB91));
+        }
+        add(
+          ParticleBurst(
+            position: item.position.clone(),
+            color: item.type.color,
+            count: 12,
+          ),
+        );
+        add(
+          FloatingText(
+            text: item.type.popupLabel,
+            position: item.position.clone(),
+            color: item.type.color,
+            fontSize: 24,
+          ),
+        );
+        add(BasketSpark(position: player.basketWorldCenter.clone()));
+        _releaseLiveItem(item);
+        return;
+      }
+
+      if (item.type.isPotion) {
+        if (!hasPotion) {
+          hasPotion = true;
+          _pulseBanner('Зелье рывка!', const Color(0xFFAB47BC));
+          audio.play('rare');
+        } else {
+          _pulseBanner('Уже есть!', const Color(0xFFE1BEE7));
+        }
+        add(
+          ParticleBurst(
+            position: item.position.clone(),
+            color: item.type.color,
+            count: 12,
+          ),
+        );
+        add(
+          FloatingText(
+            text: item.type.popupLabel,
+            position: item.position.clone(),
+            color: item.type.color,
+            fontSize: 24,
+          ),
+        );
+        add(BasketSpark(position: player.basketWorldCenter.clone()));
+        _releaseLiveItem(item);
         return;
       }
 
@@ -1289,6 +1459,9 @@ class MineRivalsGame extends FlameGame
 
     stats.player.addItem(item.type);
     stats.player.registerCatch(isBomb: false);
+    if (lead.playerLeads && item.type.isRare) {
+      raresWhileLeading++;
+    }
     _jewelStreak++;
     _rewardSuccess(GameConfig.leadGainOnRare, showPullAway: true);
     audio.play('rare');
@@ -1345,6 +1518,97 @@ class MineRivalsGame extends FlameGame
         duration: 0.28,
       ),
     );
+  }
+
+  /// Consume heart — save from explosives / lethal floor. Returns true if absorbed.
+  bool _tryConsumeHeart(Vector2 at) {
+    if (!hasHeart || _heartIFrame > 0) return false;
+    hasHeart = false;
+    _heartIFrame = GameConfig.heartIFrameSec;
+    audio.play('combo');
+    _pulseBanner('Спасён!', const Color(0xFFFF8A80));
+    add(
+      ScreenFlash(
+        color: const Color(0xFFFF5252),
+        peakAlpha: 0.2,
+        duration: 0.35,
+      ),
+    );
+    add(
+      ParticleBurst(
+        position: at,
+        color: const Color(0xFFFF5252),
+        count: 16,
+      ),
+    );
+    add(
+      FloatingText(
+        text: 'Спасён!',
+        position: at.clone(),
+        color: const Color(0xFFFF8A80),
+        fontSize: 26,
+      ),
+    );
+    _shake(8);
+    return true;
+  }
+
+  /// HUD tap — answer when thief leads / breathes down your neck.
+  void tryUsePotion() {
+    if (!canUsePotion) return;
+    hasPotion = false;
+    _potionBoostTimer = GameConfig.potionBoostDuration;
+    _thiefBurstTimer = 0;
+    lead.applyDelta(GameConfig.potionLeadGain);
+    audio.play('overtake');
+    _pulseBanner('Рывок!', const Color(0xFFCE93D8));
+    add(
+      ScreenFlash(
+        color: const Color(0xFFAB47BC),
+        peakAlpha: 0.16,
+        duration: 0.32,
+      ),
+    );
+    _shake(10);
+    add(
+      DustPuff(position: player.position.clone() + Vector2(0, -8)),
+    );
+  }
+
+  void finishTutorial() {
+    unawaited(ProgressStore.instance.markTutorialSeen());
+    overlays.remove('tutorial');
+    if (!finished && !_pitSucking) {
+      resumeEngine();
+    }
+  }
+
+  /// Emotional results copy.
+  String get finishHeadline {
+    if (failedRun) return 'УПАЛ В ЯМУ!';
+    if (stats.playerWins) {
+      if (playerOvertakes >= 2) return 'ТЫ ВЫРВАЛСЯ!';
+      return 'ТЫ ПОБЕДИЛ!';
+    }
+    if (thiefOvertakes >= 2) return 'ВОР УДРАЛ!';
+    return 'ВОР ПОБЕДИЛ!';
+  }
+
+  String get finishTagline {
+    final you = stats.player.rareTotal;
+    final thief = stats.thief.rareTotal;
+    if (failedRun) {
+      return 'Сердце спасает от ямы — ищи его в шахте!';
+    }
+    if (stats.playerWins) {
+      final margin = you - thief;
+      if (margin >= 5) return 'Разгромил вора по кристаллам!';
+      if (margin <= 1) return 'На волоске — но кристаллы твои!';
+      return 'У тебя больше красивых камней';
+    }
+    final margin = thief - you;
+    if (margin <= 1) return 'Почти! Ещё один кристалл — и ты бы выиграл';
+    return 'Вор унёс больше красивых камней';
   }
 
   /// Black pit — suck-in cinematic, then results.
@@ -1585,6 +1849,15 @@ class MineRivalsGame extends FlameGame
     _wasBreathing = false;
     _webSnareTimer = 0;
     _magnetPowerTimer = 0;
+    hasHeart = false;
+    hasPotion = false;
+    _potionBoostTimer = 0;
+    _heartIFrame = 0;
+    playerOvertakes = 0;
+    thiefOvertakes = 0;
+    raresWhileLeading = 0;
+    newDistanceRecord = false;
+    newRaresRecord = false;
     _goldStreak = 0;
     _lastCoinMult = 1;
     _jewelStreak = 0;

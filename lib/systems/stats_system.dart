@@ -43,6 +43,8 @@ class CollectorStats {
       case ItemType.web:
       case ItemType.magnet:
       case ItemType.pit:
+      case ItemType.heart:
+      case ItemType.potion:
         break;
     }
   }

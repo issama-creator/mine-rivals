@@ -9,9 +9,13 @@ enum ItemType {
   amethyst,
   legendary,
   bomb,
+  dynamiteCart,
   web,
   magnet,
   pit,
+  spikes,
+  heart,
+  potion,
 }
 
 extension ItemTypeX on ItemType {
@@ -26,20 +30,33 @@ extension ItemTypeX on ItemType {
 
   bool get isBomb => this == ItemType.bomb;
 
+  bool get isDynamiteCart => this == ItemType.dynamiteCart;
+
+  /// Bomb + dynamite cart — explode, crystal loss, heart can save.
+  bool get isExplosive => isBomb || isDynamiteCart;
+
   bool get isWeb => this == ItemType.web;
 
   bool get isMagnet => this == ItemType.magnet;
 
   bool get isPit => this == ItemType.pit;
 
+  bool get isSpikes => this == ItemType.spikes;
+
+  /// Pit + spikes — feet check, instant fail (heart can save).
+  bool get isLethalFloor => isPit || isSpikes;
+
+  bool get isHeart => this == ItemType.heart;
+
+  bool get isPotion => this == ItemType.potion;
+
   /// Hazards use a strict circular touch gate (no fat hitbox).
-  bool get isHazard =>
-      this == ItemType.bomb || this == ItemType.web || this == ItemType.pit;
+  bool get isHazard => isExplosive || isWeb || isLethalFloor;
 
   /// Pulled by the Subway-style magnet power-up (never hazards).
   bool get isMagnetizable => !isHazard;
 
-  /// Explicit jewel set — commons / hazards / magnet are NEVER in here.
+  /// Explicit jewel set — commons / hazards / pickups are NEVER in here.
   bool get isJewel {
     switch (this) {
       case ItemType.diamond:
@@ -51,9 +68,13 @@ extension ItemTypeX on ItemType {
       case ItemType.gold:
       case ItemType.coal:
       case ItemType.bomb:
+      case ItemType.dynamiteCart:
       case ItemType.web:
       case ItemType.magnet:
       case ItemType.pit:
+      case ItemType.spikes:
+      case ItemType.heart:
+      case ItemType.potion:
         return false;
     }
   }
@@ -79,12 +100,20 @@ extension ItemTypeX on ItemType {
         return 'Legendary';
       case ItemType.bomb:
         return 'Bomb';
+      case ItemType.dynamiteCart:
+        return 'Dynamite cart';
       case ItemType.web:
         return 'Web';
       case ItemType.magnet:
         return 'Magnet';
       case ItemType.pit:
         return 'Pit';
+      case ItemType.spikes:
+        return 'Spikes';
+      case ItemType.heart:
+        return 'Heart';
+      case ItemType.potion:
+        return 'Potion';
     }
   }
 
@@ -92,12 +121,20 @@ extension ItemTypeX on ItemType {
     switch (this) {
       case ItemType.bomb:
         return '−1';
+      case ItemType.dynamiteCart:
+        return 'Бум!';
       case ItemType.web:
         return 'Липко!';
       case ItemType.magnet:
         return 'Магнит!';
       case ItemType.pit:
         return 'Яма!';
+      case ItemType.spikes:
+        return 'Шипы!';
+      case ItemType.heart:
+        return 'Сердце!';
+      case ItemType.potion:
+        return 'Зелье!';
       case ItemType.coal:
         return '+2';
       default:
@@ -123,12 +160,20 @@ extension ItemTypeX on ItemType {
         return const Color(0xFFFF8F00);
       case ItemType.bomb:
         return const Color(0xFFFF1744);
+      case ItemType.dynamiteCart:
+        return const Color(0xFFFF6D00);
       case ItemType.web:
         return const Color(0xFFECEFF1);
       case ItemType.magnet:
         return const Color(0xFF29B6F6);
       case ItemType.pit:
         return const Color(0xFF212121);
+      case ItemType.spikes:
+        return const Color(0xFFFF8A65);
+      case ItemType.heart:
+        return const Color(0xFFFF5252);
+      case ItemType.potion:
+        return const Color(0xFFAB47BC);
     }
   }
 }

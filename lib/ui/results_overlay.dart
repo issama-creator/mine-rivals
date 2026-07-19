@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../game/mine_rivals_game.dart';
+import '../systems/progress_store.dart';
 
 class ResultsOverlay extends StatelessWidget {
   const ResultsOverlay({super.key, required this.game});
@@ -14,14 +15,8 @@ class ResultsOverlay extends StatelessWidget {
     final win = !failed && s.playerWins;
     final you = s.player.rareTotal;
     final thief = s.thief.rareTotal;
-    final title = failed
-        ? 'УПАЛ В ЯМУ!'
-        : (win ? 'ТЫ ПОБЕДИЛ!' : 'ВОР ПОБЕДИЛ!');
-    final subtitle = failed
-        ? 'Чёрные пятна — мгновенный конец. Уворачивайся!'
-        : (win
-            ? 'У тебя больше красивых камней'
-            : 'Вор унёс больше красивых камней');
+    final title = game.finishHeadline;
+    final subtitle = game.finishTagline;
     final titleColor = failed
         ? const Color(0xFFEF5350)
         : (win ? const Color(0xFF81C784) : const Color(0xFFFF7043));
@@ -104,9 +99,48 @@ class ResultsOverlay extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 14),
                       Text(
-                        'Лови цветные камни — не дай вору!',
+                        'Обгоны: ты ${game.playerOvertakes} · вор ${game.thiefOvertakes}',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.55),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (game.newDistanceRecord || game.newRaresRecord) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          [
+                            if (game.newDistanceRecord) 'Новый рекорд дистанции!',
+                            if (game.newRaresRecord) 'Новый рекорд кристаллов!',
+                          ].join('\n'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFFFFD54F),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Text(
+                        'Рекорд: ${ProgressStore.instance.bestDistanceMeters} м · '
+                        '${ProgressStore.instance.bestRares} крист.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        win
+                            ? 'Ещё разок — не дай вору отыграться!'
+                            : 'Лови кристаллы — и обойди его в следующий раз!',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: const Color(0xFFFFE082).withValues(alpha: 0.9),

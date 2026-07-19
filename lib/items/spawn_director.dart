@@ -52,6 +52,10 @@ class SpawnDirector {
   double _magnetCooldown = 18;
   double _pitCooldown = 8;
   double _webPitCooldown = 16;
+  double _heartCooldown = 20;
+  double _potionCooldown = 28;
+  bool _heartSpawned = false;
+  bool _potionSpawned = false;
   /// Lane the last coin trail trained the player into (for bait bombs).
   int _lastBaitLane = 1;
 
@@ -61,6 +65,10 @@ class SpawnDirector {
     _magnetCooldown = 14 + _rng.nextDouble() * 10;
     _pitCooldown = 6 + _rng.nextDouble() * 6;
     _webPitCooldown = 12 + _rng.nextDouble() * 10;
+    _heartCooldown = 18 + _rng.nextDouble() * 10;
+    _potionCooldown = 26 + _rng.nextDouble() * 12;
+    _heartSpawned = false;
+    _potionSpawned = false;
     _lastBaitLane = 1;
     _enqueueBreathing();
   }
@@ -69,6 +77,8 @@ class SpawnDirector {
     _magnetCooldown = max(0, _magnetCooldown - dt);
     _pitCooldown = max(0, _pitCooldown - dt);
     _webPitCooldown = max(0, _webPitCooldown - dt);
+    _heartCooldown = max(0, _heartCooldown - dt);
+    _potionCooldown = max(0, _potionCooldown - dt);
   }
 
   SpawnBeat nextBeat({required double progress}) {
@@ -109,16 +119,32 @@ class SpawnDirector {
       return;
     }
 
+    // One heart / potion per run — rare Subway-style pickups.
+    if (!_heartSpawned &&
+        _heartCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.heartSpawnChance) {
+      _enqueueHeart();
+      return;
+    }
+    if (!_potionSpawned &&
+        _potionCooldown <= 0 &&
+        progress > 0.18 &&
+        _rng.nextDouble() < GameConfig.potionSpawnChance) {
+      _enqueuePotion();
+      return;
+    }
+
     // Rare: two webs to snare, then a pit while sticky (~2–3 m later).
     if (_webPitCooldown <= 0 &&
         _pitCooldown <= 0 &&
-        _rng.nextDouble() < GameConfig.webPitComboChance) {
+        _rng.nextDouble() < GameConfig.webPitComboChanceAt(progress)) {
       _enqueueWebPitCombo(progress);
       return;
     }
 
-    // Black pits — rare but lethal.
-    if (_pitCooldown <= 0 && _rng.nextDouble() < GameConfig.pitSpawnChance) {
+    // Black pits — unlock mid-run, rarer than before.
+    if (_pitCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.pitSpawnChanceAt(progress)) {
       _enqueuePitTrap();
       return;
     }
@@ -126,33 +152,32 @@ class SpawnDirector {
     final roll = _rng.nextDouble();
     final p = progress.clamp(0.0, 1.0);
 
-    // Heavier trap mix — timing bombs + pits dominate mid/late run.
-    // Jewel pockets ~+20% vs prior weights.
-    if (roll < 0.12 + p * 0.02) {
+    // Early: more loot air. Late: bombs stay sharp, lethal floors gated.
+    if (roll < 0.14 + p * 0.02) {
       _coinColumn();
-    } else if (roll < 0.20 + p * 0.02) {
+    } else if (roll < 0.23 + p * 0.02) {
       _coinArc();
-    } else if (roll < 0.27) {
-      _coinZigzag();
     } else if (roll < 0.31) {
+      _coinZigzag();
+    } else if (roll < 0.36) {
       _coinRow();
-    } else if (roll < 0.41 + p * 0.025) {
+    } else if (roll < 0.48 + p * 0.02) {
       _jewelPocket();
-    } else if (roll < 0.50 + p * 0.03) {
+    } else if (roll < 0.55 + p * 0.025) {
       _laneBaitBomb(); // coins → bomb same lane (tight)
-    } else if (roll < 0.58 + p * 0.03) {
+    } else if (roll < 0.62 + p * 0.025) {
       _switchGateBomb();
-    } else if (roll < 0.65 + p * 0.03) {
+    } else if (roll < 0.68 + p * 0.02) {
       _dodgePunishStagger();
-    } else if (roll < 0.73 + p * 0.02) {
+    } else if (roll < 0.75 + p * 0.015) {
       _jewelTrapBomb();
-    } else if (roll < 0.78 + p * 0.02) {
+    } else if (roll < 0.80 + p * 0.015) {
       _timingSnapBomb(); // almost no telegraph — pure timing
-    } else if (roll < 0.84 + p * 0.02) {
+    } else if (roll < 0.85 + p * 0.015) {
       _fakeSafeThenBomb(); // long hush, then snap bomb
-    } else if (roll < 0.90) {
+    } else if (roll < 0.91) {
       _bombGateWithSilence();
-    } else if (roll < 0.97) {
+    } else if (p >= GameConfig.pitUnlockProgress && roll < 0.95) {
       _enqueuePitTrap();
     } else {
       _mixedSweep();
@@ -500,6 +525,30 @@ class SpawnDirector {
     _magnetCooldown = GameConfig.magnetRespawnMin +
         _rng.nextDouble() *
             (GameConfig.magnetRespawnMax - GameConfig.magnetRespawnMin);
+    _patternCooldown = 1;
+  }
+
+  void _enqueueHeart() {
+    final lane = _rng.nextInt(3);
+    _lastBaitLane = lane;
+    _queue.add(SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.18));
+    _queue.add(
+      SpawnBeat(type: ItemType.heart, lane: lane, gapMult: 1.05),
+    );
+    _heartSpawned = true;
+    _heartCooldown = GameConfig.heartRespawnMin;
+    _patternCooldown = 1;
+  }
+
+  void _enqueuePotion() {
+    final lane = _rng.nextInt(3);
+    _lastBaitLane = lane;
+    _queue.add(SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.18));
+    _queue.add(
+      SpawnBeat(type: ItemType.potion, lane: lane, gapMult: 1.05),
+    );
+    _potionSpawned = true;
+    _potionCooldown = GameConfig.potionRespawnMin;
     _patternCooldown = 1;
   }
 

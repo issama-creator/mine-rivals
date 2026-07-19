@@ -46,7 +46,7 @@ class AssetLibrary {
 
   /// Per corridor: gems for that shaft.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 35;
+  static const int _assetVersion = 36;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
@@ -124,6 +124,8 @@ class AssetLibrary {
     // Parallel boot — isolate work + image IO overlap.
     final results = await Future.wait<Object?>([
       _loadBlackKeyed('assets/elements.png'),
+      _loadBlackKeyed('assets/images/hazards/dynamite_cart.png'),
+      _loadBlackKeyed('assets/images/hazards/spikes.png'),
       _loadCorridorSlot(0),
       _loadJewelSlot(0),
       _loadThiefPrimary(),
@@ -133,6 +135,8 @@ class AssetLibrary {
 
     final elementsImg = results[0]! as ui.Image;
     _sliceElements(elementsImg);
+    items[ItemType.dynamiteCart] = Sprite(results[1]! as ui.Image);
+    items[ItemType.spikes] = Sprite(results[2]! as ui.Image);
     applyCorridorJewels(0);
     minerRun = minerRunForSelected();
     _loadedVersion = _assetVersion;
@@ -330,10 +334,15 @@ class AssetLibrary {
     items[ItemType.gold] = coin;
     items[ItemType.bomb] = bomb;
     items[ItemType.coal] = bar;
-    // Web/magnet drawn procedurally — placeholder only for Flame.
+    // Web/magnet/pit drawn procedurally — placeholder only for Flame.
+    // Dynamite cart / spikes loaded from hazards/ after elements slice.
     items[ItemType.web] = bomb;
     items[ItemType.magnet] = coin;
     items[ItemType.pit] = bomb;
+    items[ItemType.heart] = coin;
+    items[ItemType.potion] = coin;
+    items[ItemType.dynamiteCart] ??= bomb;
+    items[ItemType.spikes] ??= bomb;
   }
 
   static Future<ui.Image> _loadBlackKeyed(String path) async {

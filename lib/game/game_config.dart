@@ -14,25 +14,44 @@ class GameConfig {
   static double get levelLengthMeters =>
       corridorSegmentMeters * corridorCount;
 
-  /// Subway-style pace: starts calm, steps up every [speedStepMeters].
+  /// Subway-style pace: starts calm, steps up every [speedStepMeters],
+  /// then soft-caps so late run stays readable (top-runner style).
   static const double runSpeedStart = 11.9;
 
   /// Speed jumps every this many meters.
   static const double speedStepMeters = 200;
 
-  /// +25% of start every 200 m (was +15%, +10% more on top).
+  /// Full +25% bumps until [speedSoftCapStep], then tiny steps.
   static const double speedStepBoost = 0.25;
+
+  /// After this many 200 m steps (~1200 m) pace rises much slower.
+  static const int speedSoftCapStep = 6;
+
+  /// Post-cap bump per step (keeps late run tense, not unreadable).
+  static const double speedSoftStepBoost = 0.07;
+
+  /// Hard ceiling ≈ ×2.85 start (~34 m/s world) — was uncapped ~×5+.
+  static const double speedHardCapMult = 2.85;
 
   /// HUD/corridor meters still say 700 — but they tick this fraction of pace
   /// (lower = longer shafts). 0.62 ≈ +17% duration vs previous 0.75.
   static const double distanceMeterRate = 0.62;
 
-  /// World run speed — +25% of start every 200 m (both modes).
+  /// World run speed with soft-cap after mid run.
   static double runSpeedAt(double progress) {
     final distance = (progress.clamp(0.0, 1.0)) * levelLengthMeters;
     final step = (distance / speedStepMeters).floor();
-    // 0m → start, 200m → ×1.25, 400m → ×1.50, …
-    return runSpeedStart * (1.0 + speedStepBoost * step);
+    final double mult;
+    if (step <= speedSoftCapStep) {
+      // 0 → ×1.0, 6 → ×2.5
+      mult = 1.0 + speedStepBoost * step;
+    } else {
+      final soft = step - speedSoftCapStep;
+      mult = 1.0 +
+          speedStepBoost * speedSoftCapStep +
+          speedSoftStepBoost * soft;
+    }
+    return runSpeedStart * mult.clamp(1.0, speedHardCapMult);
   }
 
   /// How fast run-cycle anim plays vs base (matches world pace).
@@ -41,10 +60,12 @@ class GameConfig {
     return (pace / runSpeedStart).clamp(1.0, 2.9);
   }
 
-  /// Spawn density — late shafts throw loot much denser.
+  /// Spawn density — rises, but softer than before so late air remains.
   static double spawnTempoAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
-    return 1.0 + t * 1.25;
+    // Was +125% → now +90%, with a flatter last third.
+    final shaped = t < 0.66 ? t : 0.66 + (t - 0.66) * 0.55;
+    return 1.0 + shaped * 0.9;
   }
 
   /// Hot chase — ~15% easier than first rivalry pass (thief less oppressive).
@@ -163,10 +184,10 @@ class GameConfig {
 
   /// Last meters: sprint denser loot + finish beat.
   static const double finaleMeters = 100;
-  /// Spawn gaps shrink in the final sprint.
-  static const double finaleSpawnGapMult = 0.58;
+  /// Spawn gaps shrink in the final sprint (was 0.58 — more air now).
+  static const double finaleSpawnGapMult = 0.72;
   /// Slight world rush (not slow-mo) for the last push.
-  static const double finalePlayRate = 1.08;
+  static const double finalePlayRate = 1.06;
 
   // ── Coin combo multiplier (Subway-style) ─────────────────────────────────
   /// Unbroken gold streak for ×2.
@@ -183,6 +204,12 @@ class GameConfig {
   static const double bombDisplaySize = 54;
   /// Extra bomb scale at full pace (1 = base, 1.22 = +22% when fast).
   static const double bombSpeedScaleMax = 1.22;
+  /// Dynamite minecart — larger readable hazard, same explosive rules as bomb.
+  static const double dynamiteCartDisplaySize = 64;
+  /// Chance a bomb spawn slot becomes a dynamite cart instead.
+  static const double dynamiteCartChance = 0.32;
+  /// Slightly harsher chase hit than a plain bomb.
+  static const double leadLossOnDynamiteCart = 1.35;
 
   static const double magnetRadius = 16;
   static const double magnetPullSpeed = 45;
@@ -200,6 +227,22 @@ class GameConfig {
   static const double magnetSpawnChance = 0.04;
   static const double magnetRespawnMin = 22;
   static const double magnetRespawnMax = 38;
+
+  // ── Heart (1 per run — saves explosives / pit / spikes) ──────────────────
+  static const double heartDisplaySize = 40;
+  /// Slightly more common so one lethal mistake isn't pure RNG.
+  static const double heartSpawnChance = 0.10;
+  static const double heartRespawnMin = 28;
+  static const double heartIFrameSec = 0.45;
+
+  // ── Potion boost (1 per run — answer thief lead) ─────────────────────────
+  static const double potionDisplaySize = 40;
+  static const double potionSpawnChance = 0.05;
+  static const double potionRespawnMin = 48;
+  static const double potionBoostDuration = 2.5;
+  static const double potionLeadGain = 2.6;
+  /// Usable when thief leads, or while breathing (gap ≤ this).
+  static const double potionUseLeadMax = 1.5;
   static const double catchRadius = 26;
   /// Bombs: circular center-to-center touch only — near misses never explode.
   static const double bombCatchRadius = 15;
@@ -212,8 +255,8 @@ class GameConfig {
   static const int webFromCorridor = 1;
   /// Chance a normal spawn beat becomes a web (once eligible). +10% traps.
   static const double webSpawnChance = 0.11;
-  /// Rare combo: double web → pit a few meters later (also gated by cooldown).
-  static const double webPitComboChance = 0.055;
+  /// Rare combo: double web → pit (legacy; prefer [webPitComboChanceAt]).
+  static const double webPitComboChance = 0.035;
   static const double webPitComboCooldownMin = 22;
   static const double webPitComboCooldownMax = 36;
   /// How long the player stays sticky/slow after touching a web.
@@ -237,12 +280,41 @@ class GameConfig {
   static const double pitDisplaySize = 52;
   /// Touch radius vs player feet / basket — forgiving edge, lethal center.
   static const double pitCatchRadius = 22;
-  /// Pattern chance for a pit trap (also gated by cooldown in director).
-  static const double pitSpawnChance = 0.16;
-  static const double pitRespawnMin = 6.5;
-  static const double pitRespawnMax = 12;
+  /// Legacy base — prefer [pitSpawnChanceAt].
+  static const double pitSpawnChance = 0.10;
+  /// No lethal floors in the opening stretch (teach jewels / bombs first).
+  static const double pitUnlockProgress = 0.14;
+  static const double pitRespawnMin = 9.0;
+  static const double pitRespawnMax = 16.0;
   /// Suck-into-pit cinematic length (seconds).
   static const double pitSuckDuration = 0.78;
+
+  /// Direct pit roll scales with progress (0 early → ~0.11 late).
+  static double pitSpawnChanceAt(double progress) {
+    final t = progress.clamp(0.0, 1.0);
+    if (t < pitUnlockProgress) return 0;
+    final u = ((t - pitUnlockProgress) / (1.0 - pitUnlockProgress)).clamp(0.0, 1.0);
+    return 0.05 + u * 0.06;
+  }
+
+  /// Web→pit combo only after the player has learned the chase.
+  static double webPitComboChanceAt(double progress) {
+    final t = progress.clamp(0.0, 1.0);
+    if (t < 0.22) return 0;
+    return 0.028 + (t - 0.22) / 0.78 * 0.025;
+  }
+
+  // ── Spikes — lethal floor (same fail path as pit) ─────────────────────────
+  static const double spikesDisplaySize = 58;
+  static const double spikesCatchRadius = 20;
+  /// Legacy mid value — prefer [spikesChanceAt].
+  static const double spikesChance = 0.32;
+
+  /// Spikes share of lethal floors: quieter early, more variety late.
+  static double spikesChanceAt(double progress) {
+    final t = progress.clamp(0.0, 1.0);
+    return 0.18 + t * 0.22;
+  }
 
   /// Opening beat — thief close on camera so the chase reads immediately.
   static const double chaseIntroSec = 2.35;

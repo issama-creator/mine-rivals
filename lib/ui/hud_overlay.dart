@@ -35,6 +35,10 @@ class _HudOverlayState extends State<HudOverlay> {
   bool _lastYouLead = true;
   bool _lastBurst = false;
   bool _lastBreath = false;
+  bool _lastHeart = false;
+  bool _lastPotion = false;
+  bool _lastCanPotion = false;
+  bool _lastPotionBoost = false;
   String? _lastBanner;
 
   @override
@@ -58,6 +62,10 @@ class _HudOverlayState extends State<HudOverlay> {
       final magnetSec = g.magnetPowerSeconds.ceil();
       final burst = g.isThiefBursting;
       final breath = g.isThiefBreathing;
+      final heart = g.hasHeart;
+      final potion = g.hasPotion;
+      final canPotion = g.canUsePotion;
+      final potionBoost = g.isPotionBoosting;
       if (you == _lastYou &&
           thief == _lastThief &&
           run == _lastRun &&
@@ -69,7 +77,11 @@ class _HudOverlayState extends State<HudOverlay> {
           banner == _lastBanner &&
           magnetSec == _lastMagnetSec &&
           burst == _lastBurst &&
-          breath == _lastBreath) {
+          breath == _lastBreath &&
+          heart == _lastHeart &&
+          potion == _lastPotion &&
+          canPotion == _lastCanPotion &&
+          potionBoost == _lastPotionBoost) {
         return;
       }
       _lastYou = you;
@@ -84,6 +96,10 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastMagnetSec = magnetSec;
       _lastBurst = burst;
       _lastBreath = breath;
+      _lastHeart = heart;
+      _lastPotion = potion;
+      _lastCanPotion = canPotion;
+      _lastPotionBoost = potionBoost;
       setState(() {});
     });
   }
@@ -289,27 +305,79 @@ class _HudOverlayState extends State<HudOverlay> {
                     ),
                   ),
                 ),
-                Material(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(
-                      color: const Color(0xFFFFB300).withValues(alpha: 0.45),
-                    ),
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: _openPauseMenu,
-                    child: const SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Icon(
-                        Icons.pause_rounded,
-                        size: 22,
-                        color: Color(0xFFFFE082),
+                Column(
+                  children: [
+                    Material(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color:
+                              const Color(0xFFFFB300).withValues(alpha: 0.45),
+                        ),
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _openPauseMenu,
+                        child: const SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Icon(
+                            Icons.pause_rounded,
+                            size: 22,
+                            color: Color(0xFFFFE082),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    if (game.hasHeart || game.hasPotion) ...[
+                      const SizedBox(height: 6),
+                      if (game.hasHeart)
+                        IgnorePointer(
+                          child: _PowerChip(
+                            icon: Icons.favorite_rounded,
+                            color: const Color(0xFFFF5252),
+                            active: true,
+                          ),
+                        ),
+                      if (game.hasHeart && game.hasPotion)
+                        const SizedBox(height: 6),
+                      if (game.hasPotion)
+                        Material(
+                          color: Colors.black.withValues(
+                            alpha: game.canUsePotion ? 0.5 : 0.28,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(
+                              color: const Color(0xFFAB47BC).withValues(
+                                alpha: game.canUsePotion ? 0.9 : 0.35,
+                              ),
+                            ),
+                          ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: game.canUsePotion
+                                ? () {
+                                    HapticFeedback.mediumImpact();
+                                    game.tryUsePotion();
+                                  }
+                                : null,
+                            child: SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: Icon(
+                                Icons.science_rounded,
+                                size: 22,
+                                color: Color(0xFFE1BEE7).withValues(
+                                  alpha: game.canUsePotion ? 1 : 0.4,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ],
                 ),
               ],
             ),
@@ -345,7 +413,12 @@ class _HudOverlayState extends State<HudOverlay> {
                 ],
               ),
             ),
-            if (game.hasMagnetPower) ...[
+            if (game.isPotionBoosting) ...[
+              const SizedBox(height: 6),
+              IgnorePointer(
+                child: _toast('Рывок!', const Color(0xFFCE93D8)),
+              ),
+            ] else if (game.hasMagnetPower) ...[
               const SizedBox(height: 6),
               IgnorePointer(
                 child: _toast(
@@ -655,6 +728,34 @@ class _CrystalScore extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PowerChip extends StatelessWidget {
+  const _PowerChip({
+    required this.icon,
+    required this.color,
+    required this.active,
+  });
+
+  final IconData icon;
+  final Color color;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: active ? 0.85 : 0.35)),
+      ),
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: Icon(icon, size: 22, color: color),
       ),
     );
   }

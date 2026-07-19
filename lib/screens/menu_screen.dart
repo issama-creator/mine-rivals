@@ -12,6 +12,7 @@ import '../systems/progress_store.dart';
 import '../ui/game_loading_screen.dart';
 import '../ui/hud_overlay.dart';
 import '../ui/results_overlay.dart';
+import '../ui/tutorial_overlay.dart';
 
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
@@ -257,6 +258,8 @@ class _MenuScreenState extends State<MenuScreen>
                       ).animate(slide),
                       child: Column(
                         children: [
+                          _LocalRecordsStrip(),
+                          const SizedBox(height: 12),
                           _RunModePicker(
                             selected: GameSettings.instance.runMode,
                             onChanged: (mode) {
@@ -1054,6 +1057,37 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
   }
 }
 
+class _LocalRecordsStrip extends StatelessWidget {
+  const _LocalRecordsStrip();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = ProgressStore.instance;
+    final dist = store.bestDistanceMeters;
+    final rares = store.bestRares;
+    if (dist <= 0 && rares <= 0) {
+      return Text(
+        'Рекорд появится после первого забега',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.45),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
+    return Text(
+      'Рекорд: $dist м · $rares крист.',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: const Color(0xFFFFE082).withValues(alpha: 0.85),
+        fontSize: 14,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+  }
+}
+
 /// Top-left daily missions sticker with unread/remaining badge.
 class _MissionSticker extends StatelessWidget {
   const _MissionSticker({required this.onTap});
@@ -1196,7 +1230,7 @@ class _DailyMissionsSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '7 / 14 / 21… дней подряд → новые скины',
+                  'Серия дней · неделя · рекорд дистанции → скины',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: const Color(0xFFFFB300).withValues(alpha: 0.75),
@@ -1209,7 +1243,26 @@ class _DailyMissionsSheet extends StatelessWidget {
                   _MissionRow(mission: m),
                   const SizedBox(height: 8),
                 ],
-                const SizedBox(height: 6),
+                const _WeeklyMissionRow(),
+                Builder(
+                  builder: (context) {
+                    final next = store.nextCareerUnlock();
+                    if (next == null) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Рекорд ${next.meters} м → ${next.skinName}',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
                   height: 48,
@@ -1231,6 +1284,82 @@ class _DailyMissionsSheet extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WeeklyMissionRow extends StatelessWidget {
+  const _WeeklyMissionRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = ProgressStore.instance;
+    final week = WeeklyMissions.forThisWeek();
+    final done = store.weeklyDone;
+    final prog = store.weeklyProgress.clamp(0, week.target);
+    final t = done ? 1.0 : prog / week.target;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.black.withValues(alpha: 0.35),
+        border: Border.all(
+          color: done
+              ? const Color(0xFF81C784).withValues(alpha: 0.7)
+              : const Color(0xFFCE93D8).withValues(alpha: 0.55),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Row(
+          children: [
+            Icon(
+              done ? Icons.check_circle_rounded : Icons.calendar_month_rounded,
+              color: done
+                  ? const Color(0xFF81C784)
+                  : const Color(0xFFCE93D8),
+              size: 22,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Неделя · ${week.titleRu}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.92),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: t,
+                      minHeight: 5,
+                      backgroundColor: Colors.white12,
+                      color: done
+                          ? const Color(0xFF81C784)
+                          : const Color(0xFFCE93D8),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    done ? 'Готово — скин разблокирован' : '$prog / ${week.target}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1356,6 +1485,7 @@ class _GameScreenState extends State<GameScreen> {
         overlayBuilderMap: {
           'hud': (context, MineRivalsGame g) => HudOverlay(game: g),
           'results': (context, MineRivalsGame g) => ResultsOverlay(game: g),
+          'tutorial': (context, MineRivalsGame g) => TutorialOverlay(game: g),
         },
         initialActiveOverlays: const ['hud'],
       ),
