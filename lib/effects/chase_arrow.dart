@@ -4,10 +4,10 @@ import 'dart:ui';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
-/// Faint “he’s still back there” marker when the thief is barely on screen.
+/// Faint chase marker — bottom when thief is behind, top when he bolted ahead.
 class ChaseArrow extends PositionComponent {
   ChaseArrow()
-    : super(
+      : super(
           size: Vector2(36, 40),
           anchor: Anchor.bottomCenter,
           priority: 40,
@@ -17,6 +17,8 @@ class ChaseArrow extends PositionComponent {
   double _shown = 0;
   double targetShown = 0;
   double laneX = 0;
+  /// True = point toward top of screen (thief ahead / off-screen).
+  bool pointUp = false;
   final Paint _fill = Paint()
     ..style = PaintingStyle.fill
     ..isAntiAlias = true;
@@ -42,11 +44,20 @@ class ChaseArrow extends PositionComponent {
     if (_shown < 0.02) return;
 
     final bob = sin(_pulse) * 3.5;
-    final alpha = (0.18 + 0.14 * (0.5 + 0.5 * sin(_pulse))) * _shown;
-    _fill.color = Color.fromRGBO(255, 200, 120, alpha);
+    final hot = pointUp ? 1.35 : 1.0;
+    final alpha = (0.22 + 0.16 * (0.5 + 0.5 * sin(_pulse))) * _shown * hot;
+    _fill.color = pointUp
+        ? Color.fromRGBO(255, 120, 90, alpha.clamp(0.0, 1.0))
+        : Color.fromRGBO(255, 200, 120, alpha.clamp(0.0, 1.0));
     _stroke.color = Color.fromRGBO(40, 20, 10, alpha * 0.55);
 
     final cx = size.x * 0.5;
+    canvas.save();
+    if (pointUp) {
+      canvas.translate(cx, size.y * 0.5);
+      canvas.rotate(pi);
+      canvas.translate(-cx, -size.y * 0.5);
+    }
     final top = 4 + bob;
     _path
       ..reset()
@@ -60,5 +71,6 @@ class ChaseArrow extends PositionComponent {
       ..close();
     canvas.drawPath(_path, _fill);
     canvas.drawPath(_path, _stroke);
+    canvas.restore();
   }
 }

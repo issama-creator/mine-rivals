@@ -236,7 +236,7 @@ class _MenuScreenState extends State<MenuScreen>
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            'Лови цветные камни!\nВор крадёт только их',
+                            'Больше кристаллов, чем у вора —\nи жми Финиш!',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.85),
@@ -1058,17 +1058,43 @@ class _LocalRecordsStrip extends StatelessWidget {
     final store = ProgressStore.instance;
     final dist = store.bestDistanceMeters;
     final rares = store.bestRares;
-    // Menu stays clean — streak / week / FOMO live in Миссии.
-    return Text(
-      dist <= 0 && rares <= 0
-          ? 'Рекорд появится после первого забега'
-          : 'Рекорд: $dist м · $rares крист.',
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        color: const Color(0xFFFFE082).withValues(alpha: 0.85),
-        fontSize: 14,
-        fontWeight: FontWeight.w800,
-      ),
+    final hook = store.comebackHook();
+    final lvl = store.minerLevel;
+    final record = dist <= 0 && rares <= 0
+        ? 'Рекорд появится после первого забега'
+        : 'Рекорд: $dist м · $rares крист.';
+    return Column(
+      children: [
+        Text(
+          'Ур. $lvl · ${store.minerTitle}',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: const Color(0xFFFFCA28).withValues(alpha: 0.9),
+            fontSize: 13,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          record,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: const Color(0xFFFFE082).withValues(alpha: 0.85),
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          hook,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: const Color(0xFF81C784).withValues(alpha: 0.9),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
     );
   }
 }

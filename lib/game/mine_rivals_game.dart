@@ -184,6 +184,16 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   bool failedByThiefEscape = false;
   /// Lethal floor was spikes (not pit) — results copy differs.
   bool failedBySpikes = false;
+  /// Player claimed win via Финиш while leading crystals.
+  bool finishedByChoice = false;
+  /// XP earned last commit (results / menu meta).
+  int lastRunXpGain = 0;
+  /// Gap banners while thief is far ahead.
+  int _lastGapBannerAt = 0;
+  bool _taughtMagnet = false;
+  bool _taughtHeart = false;
+  bool _taughtPotion = false;
+  bool _taughtCatchUp = false;
 
   /// Counts up while primary thief is off-screen ahead.
   double _thiefEscapeTimer = 0;
@@ -354,18 +364,47 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   }
 
   void _updateChaseArrow() {
-    // Only when you're ahead and the thief is a speck / off the bottom edge.
+    if (lead.isOvertaking) {
+      chaseArrow.setActive(false);
+      return;
+    }
+    // You ahead: arrow at bottom when thief is a speck.
     final farBehind =
         lead.playerLeads &&
         lead.leadDistance >= GameConfig.chaseArrowLeadMin &&
-        !lead.isOvertaking;
-    final offish =
-        thief.position.y > size.y * 0.92 ||
-        thief.size.y < GameConfig.thiefHeight * 0.55;
-    chaseArrow.setActive(farBehind && offish);
+        (thief.position.y > size.y * 0.92 ||
+            thief.size.y < GameConfig.thiefHeight * 0.55);
+    // Thief ahead / off-top: arrow at top so chase never becomes “only a number”.
+    final farAhead = !lead.playerLeads && thiefGapMeters >= 28;
+    chaseArrow.setActive(farBehind || farAhead);
+    chaseArrow.pointUp = farAhead;
     chaseArrow.laneX = thief.position.x.clamp(48.0, size.x - 48.0);
-    chaseArrow.position.y = size.y - 28;
+    chaseArrow.position.y = farAhead ? 36 : size.y - 28;
   }
+
+  void _updateFarGapBanners(double dt) {
+    if (lead.playerLeads || finished || _finishBeat || inChaseIntro) {
+      _lastGapBannerAt = 0;
+      return;
+    }
+    final gap = thiefGapMeters;
+    // Pulse every ~30 m of lead once he is clearly ahead.
+    final bucket = (gap / 30).floor();
+    if (bucket >= 1 && bucket > _lastGapBannerAt) {
+      _lastGapBannerAt = bucket;
+      _pulseBanner('Вор +$gap м', const Color(0xFFFF8A65));
+    }
+  }
+
+  /// Crystal lead + enough meters → can claim Финиш victory.
+  bool get canClaimFinish =>
+      !finished &&
+      !_finishBeat &&
+      !_pitSucking &&
+      !failedRun &&
+      !inChaseIntro &&
+      stats.playerWins &&
+      distance >= GameConfig.finishMinMeters;
 
   @override
   void update(double dt) {
@@ -520,6 +559,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
 
     _updateChaseArrow();
+    _updateFarGapBanners(step);
     _updateDrawOrder();
 
     dustTimer += step;
@@ -601,6 +641,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       won: won,
       missions: _dailyMissions,
     );
+    lastRunXpGain = result.xp;
     for (final m in _dailyMissions) {
       if (result.missions.contains(m.titleRu) &&
           !_missionToasted.contains(m.id)) {
@@ -1365,7 +1406,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     // Show the close — player sees the gap shrink on clean coins.
     final left = (-lead.leadDistance).clamp(0.0, -GameConfig.minLeadDistance);
     final closed = gain.round().clamp(1, 99);
-    if (_goldStreak >= 2 || closed >= 3) {
+    if (!_taughtCatchUp) {
+      _taughtCatchUp = true;
+      _pulseBanner('Монеты догоняют вора!', const Color(0xFF66BB6A));
+    } else if (_goldStreak >= 2 || closed >= 3) {
       _pulseBanner(
         '−$closed м → вор ${left.round()} м',
         const Color(0xFF66BB6A),
@@ -1483,10 +1527,15 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       if (item.type.isHeart) {
         if (hearts < GameConfig.maxHearts) {
           hearts++;
-          _pulseBanner(
-            'Сердце $hearts/${GameConfig.maxHearts}',
-            const Color(0xFFFF5252),
-          );
+          if (!_taughtHeart) {
+            _taughtHeart = true;
+            _pulseBanner('Щит от ямы и шипов!', const Color(0xFFFF5252));
+          } else {
+            _pulseBanner(
+              'Сердце $hearts/${GameConfig.maxHearts}',
+              const Color(0xFFFF5252),
+            );
+          }
           audio.play('rare');
         } else {
           _pulseBanner('Макс ${GameConfig.maxHearts}!', const Color(0xFFFFAB91));
@@ -1514,7 +1563,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       if (item.type.isPotion) {
         if (!hasPotion) {
           hasPotion = true;
-          _pulseBanner('Зелье рывка!', const Color(0xFFAB47BC));
+          if (!_taughtPotion) {
+            _taughtPotion = true;
+            _pulseBanner('Зелье: рывок, когда вор впереди!', const Color(0xFFAB47BC));
+          } else {
+            _pulseBanner('Зелье рывка!', const Color(0xFFAB47BC));
+          }
           audio.play('rare');
         } else {
           _pulseBanner('Уже есть!', const Color(0xFFE1BEE7));
@@ -1541,6 +1595,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
       if (item.type.isMagnet) {
         _activateMagnetPower();
+        if (!_taughtMagnet) {
+          _taughtMagnet = true;
+          _pulseBanner('Магнит тянет лут!', const Color(0xFF29B6F6));
+        }
         add(
           ParticleBurst(
             position: item.position.clone(),
@@ -1771,6 +1829,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (failedRun) {
       return failedBySpikes ? 'УМЕР ОТ ШИПОВ!' : 'УПАЛ В ЯМУ!';
     }
+    if (finishedByChoice && stats.playerWins) return 'ПОБЕДА!';
     if (stats.playerWins) return 'КРИСТАЛЛЫ ТВОИ!';
     return 'ВОР ЗАБРАЛ БОЛЬШЕ!';
   }
@@ -1786,6 +1845,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       return failedBySpikes
           ? 'Сердце спасает от шипов — $meters м'
           : 'Сердце спасает от ямы — $meters м';
+    }
+    if (finishedByChoice && stats.playerWins) {
+      return 'Забрал победу · $you–$thief · $meters м';
     }
     if (stats.playerWins) {
       return 'Кристаллы $you–$thief · $meters м';
@@ -1944,13 +2006,22 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     resumeEngine();
   }
 
-  /// End the run early and show results (forfeit / quit from menu).
-  void endRunEarly() {
+  /// Claim victory while leading crystals (Финиш).
+  void claimVictoryFinish() {
+    if (!canClaimFinish) return;
+    audio.play('combo');
+    _pulseBanner('Финиш!', const Color(0xFF81C784));
+    endRunEarly(asVictory: true);
+  }
+
+  /// End the run early and show results (forfeit / Финиш / quit from menu).
+  void endRunEarly({bool asVictory = false}) {
     if (finished || _finishBeat) return;
     finished = true;
     failedRun = false;
     failedByThiefEscape = false;
     failedBySpikes = false;
+    finishedByChoice = asVictory;
     _thiefEscapeTimer = 0;
     _finishBeat = false;
     _webSnareTimer = 0;
@@ -2063,6 +2134,13 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     failedRun = false;
     failedByThiefEscape = false;
     failedBySpikes = false;
+    finishedByChoice = false;
+    lastRunXpGain = 0;
+    _lastGapBannerAt = 0;
+    _taughtMagnet = false;
+    _taughtHeart = false;
+    _taughtPotion = false;
+    _taughtCatchUp = false;
     _thiefEscapeTimer = 0;
     _thiefEscapeBannerCd = 0;
     _pitSucking = false;

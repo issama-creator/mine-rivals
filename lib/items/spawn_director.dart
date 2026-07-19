@@ -232,45 +232,51 @@ class SpawnDirector {
     }
 
     final tier = _trapTier;
+    final softOk = _runDistance >= GameConfig.lethalComboUnlockMeters;
+    final teachOk = _runDistance >= GameConfig.teachComboUnlockMeters;
 
-    // Progressive combos — unlock every ~200 m (top-runner set-pieces).
-    // Tier 1 (200m): bomb→spikes, bomb sandwich→pit
-    if (tier >= 1 &&
+    // Soft start: first ~200 m — loot / bombs / teach spikes. No lethal set-pieces.
+    // Tier 1 teach (~200 m): bomb→spikes only.
+    if (teachOk &&
         _bombSpikesCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.bombSpikesComboChanceAt(progress)) {
       _enqueueBombSpikesCombo();
       return;
     }
-    if (tier >= 1 &&
+
+    // Lethal set-pieces from ~380 m (tier 2+ feel, gated by meters).
+    if (softOk &&
         _bombSandwichCooldown <= 0 &&
         _pitCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.bombSandwichPitChance) {
       _enqueueBombSandwichPit();
       return;
     }
-
-    // Tier 2 (400m): web→pit, zigzag, gate→web→pit, bomb→web→spikes
-    if (tier >= 2 &&
+    if (softOk &&
+        tier >= 2 &&
         _webPitCooldown <= 0 &&
         _pitCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.webPitComboChanceAt(progress)) {
       _enqueueWebPitCombo(progress);
       return;
     }
-    if (tier >= 2 &&
+    if (softOk &&
+        tier >= 2 &&
         _zigzagCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.zigzagBombChance) {
       _enqueueZigzagBombs();
       return;
     }
-    if (tier >= 2 &&
+    if (softOk &&
+        tier >= 2 &&
         _gateWebPitCooldown <= 0 &&
         _pitCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.gateWebPitChance) {
       _enqueueGateWebPit();
       return;
     }
-    if (tier >= 2 &&
+    if (softOk &&
+        tier >= 2 &&
         _bombWebSpikesCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.bombWebSpikesChance) {
       _enqueueBombWebSpikes();
@@ -278,19 +284,22 @@ class SpawnDirector {
     }
 
     // Tier 3 (600m): web→spikes, sticky zigzag, split floor
-    if (tier >= 3 &&
+    if (softOk &&
+        tier >= 3 &&
         _webSpikesCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.webSpikesComboChance) {
       _enqueueWebSpikesCombo();
       return;
     }
-    if (tier >= 3 &&
+    if (softOk &&
+        tier >= 3 &&
         _stickyZigzagCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.stickyZigzagChance) {
       _enqueueStickyZigzag();
       return;
     }
-    if (tier >= 3 &&
+    if (softOk &&
+        tier >= 3 &&
         _splitFloorCooldown <= 0 &&
         _pitCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.splitFloorChance) {
@@ -299,14 +308,16 @@ class SpawnDirector {
     }
 
     // Tier 4 (800m): spikes→pit, double fake-safe
-    if (tier >= 4 &&
+    if (softOk &&
+        tier >= 4 &&
         _spikesPitCooldown <= 0 &&
         _pitCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.spikesPitComboChance) {
       _enqueueSpikesPitCombo();
       return;
     }
-    if (tier >= 4 &&
+    if (softOk &&
+        tier >= 4 &&
         _fakeSafeDoubleCooldown <= 0 &&
         _pitCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.fakeSafeDoubleChance) {

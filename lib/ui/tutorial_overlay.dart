@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../game/mine_rivals_game.dart';
 
-/// One-time 2-beat intro: dodge → crystals vs thief.
+/// One-time intro matching real rules: crystals → gap → coins → heart → finish.
 class TutorialOverlay extends StatefulWidget {
   const TutorialOverlay({super.key, required this.game});
 
@@ -20,13 +20,30 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
     (
       icon: Icons.swipe_rounded,
       title: 'Уклоняйся',
-      body: 'Веди пальцем влево и вправо — обходи бомбы и ямы.',
+      body: 'Веди пальцем влево и вправо — обходи бомбы, ямы и шипы.',
     ),
     (
       icon: Icons.diamond_rounded,
-      title: 'Кристаллы и вор',
+      title: 'Кристаллы — приз',
       body:
-          'Цветные камни решают гонку. Если вор впереди — он их крадёт. Не дай удрать!',
+          'Цветные камни решают гонку. У кого больше в конце — тот победил. Вор крадёт только их.',
+    ),
+    (
+      icon: Icons.speed_rounded,
+      title: 'Догоняй монетами',
+      body:
+          'Ошибка — вор уходит (+м вверху). Собирай монеты без промахов — сокращаешь дистанцию.',
+    ),
+    (
+      icon: Icons.favorite_rounded,
+      title: 'Сердце — щит',
+      body: 'До 3 сердец. Каждое спасает от ямы или шипов. Лови их по пути.',
+    ),
+    (
+      icon: Icons.flag_rounded,
+      title: 'Жми Финиш',
+      body:
+          'Веди по кристаллам и после 150 м открой паузу → «Финиш» — забери победу сам.',
     ),
   ];
 
@@ -107,11 +124,11 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           for (var i = 0; i < _steps.length; i++) ...[
-                            if (i > 0) const SizedBox(width: 8),
+                            if (i > 0) const SizedBox(width: 6),
                             AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
-                              width: i == _step ? 18 : 8,
-                              height: 8,
+                              width: i == _step ? 16 : 7,
+                              height: 7,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(4),
                                 color: i == _step
@@ -122,24 +139,24 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                           ],
                         ],
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 18),
                       SizedBox(
                         width: double.infinity,
-                        height: 56,
+                        height: 52,
                         child: FilledButton(
                           onPressed: _next,
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFFFFB300),
                             foregroundColor: const Color(0xFF3E2723),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(14),
                             ),
                           ),
                           child: Text(
                             last ? 'ПОГНАЛИ!' : 'ДАЛЬШЕ',
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 18,
+                              fontSize: 16,
                             ),
                           ),
                         ),

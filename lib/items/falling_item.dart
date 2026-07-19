@@ -466,54 +466,78 @@ class FallingItem extends SpriteComponent {
     final c = Offset(size.x / 2, size.y / 2);
     final pulse = 0.55 + 0.2 * sin(_pulse * 1.6);
     _glowPaint.color =
-        const Color(0xFFFF5252).withValues(alpha: 0.2 + pulse * 0.2);
-    canvas.drawCircle(c, size.x * 0.46, _glowPaint);
+        const Color(0xFFFF5252).withValues(alpha: 0.28 + pulse * 0.22);
+    canvas.drawCircle(c, size.x * 0.48, _glowPaint);
 
     final path = Path();
-    final s = size.x * 0.38;
-    path.moveTo(c.dx, c.dy + s * 0.35);
+    final s = size.x * 0.42;
+    path.moveTo(c.dx, c.dy + s * 0.38);
     path.cubicTo(
       c.dx - s,
-      c.dy - s * 0.05,
-      c.dx - s * 0.85,
-      c.dy - s * 0.85,
+      c.dy - s * 0.02,
+      c.dx - s * 0.9,
+      c.dy - s * 0.9,
       c.dx,
-      c.dy - s * 0.35,
+      c.dy - s * 0.32,
     );
     path.cubicTo(
-      c.dx + s * 0.85,
-      c.dy - s * 0.85,
+      c.dx + s * 0.9,
+      c.dy - s * 0.9,
       c.dx + s,
-      c.dy - s * 0.05,
+      c.dy - s * 0.02,
       c.dx,
-      c.dy + s * 0.35,
+      c.dy + s * 0.38,
     );
     canvas.drawPath(path, _heartPaint);
+    final rim = Paint()
+      ..color = const Color(0xFFFFCDD2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8;
+    canvas.drawPath(path, rim);
+    // Shine — reads as a pickup icon, not a red blob.
+    canvas.drawCircle(
+      Offset(c.dx - s * 0.22, c.dy - s * 0.28),
+      s * 0.12,
+      Paint()..color = Colors.white.withValues(alpha: 0.55),
+    );
   }
 
   void _renderPotion(Canvas canvas) {
     final c = Offset(size.x / 2, size.y / 2);
     final pulse = 0.55 + 0.2 * sin(_pulse * 1.5);
     _glowPaint.color =
-        const Color(0xFFAB47BC).withValues(alpha: 0.22 + pulse * 0.18);
-    canvas.drawCircle(c, size.x * 0.46, _glowPaint);
+        const Color(0xFFAB47BC).withValues(alpha: 0.28 + pulse * 0.2);
+    canvas.drawCircle(c, size.x * 0.48, _glowPaint);
 
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: c + Offset(0, size.y * 0.06),
-          width: size.x * 0.42,
-          height: size.y * 0.48,
-        ),
-        const Radius.circular(10),
+    final body = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: c + Offset(0, size.y * 0.08),
+        width: size.x * 0.48,
+        height: size.y * 0.52,
       ),
-      _potionGlass,
+      const Radius.circular(12),
+    );
+    canvas.drawRRect(body, _potionGlass);
+    canvas.drawRRect(
+      body,
+      Paint()
+        ..color = const Color(0xFFE1BEE7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
+    // Liquid line.
+    canvas.drawLine(
+      Offset(c.dx - size.x * 0.16, c.dy + size.y * 0.02),
+      Offset(c.dx + size.x * 0.16, c.dy + size.y * 0.02),
+      Paint()
+        ..color = const Color(0xFFCE93D8).withValues(alpha: 0.85)
+        ..strokeWidth = 2,
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
           center: c - Offset(0, size.y * 0.22),
-          width: size.x * 0.18,
+          width: size.x * 0.2,
           height: size.y * 0.2,
         ),
         const Radius.circular(4),
@@ -523,9 +547,9 @@ class FallingItem extends SpriteComponent {
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: c - Offset(0, size.y * 0.34),
-          width: size.x * 0.22,
-          height: size.y * 0.1,
+          center: c - Offset(0, size.y * 0.36),
+          width: size.x * 0.26,
+          height: size.y * 0.12,
         ),
         const Radius.circular(3),
       ),

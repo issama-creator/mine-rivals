@@ -187,7 +187,9 @@ class _ResultsOverlayState extends State<ResultsOverlay>
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(height: 22),
+                          const SizedBox(height: 14),
+                          _MetaPull(game: game, win: win, failed: failed),
+                          const SizedBox(height: 18),
                           SizedBox(
                             width: double.infinity,
                             height: 56,
@@ -299,6 +301,82 @@ class _ResultsOverlayState extends State<ResultsOverlay>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// XP / mission / streak pull into the next run.
+class _MetaPull extends StatelessWidget {
+  const _MetaPull({
+    required this.game,
+    required this.win,
+    required this.failed,
+  });
+
+  final MineRivalsGame game;
+  final bool win;
+  final bool failed;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = ProgressStore.instance;
+    final xp = game.lastRunXpGain;
+    final lvl = store.minerLevel;
+    final into = store.minerXpIntoLevel;
+    final need = store.minerXpForNextLevel;
+    final hook = store.comebackHook();
+    final tip = failed
+        ? 'Сердце спасает · монеты догоняют вора'
+        : (win
+            ? 'Веди по кристаллам и жми Финиш'
+            : 'Собери больше камней, чем вор');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFFFB300).withValues(alpha: 0.28),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          children: [
+            Text(
+              xp > 0
+                  ? '+$xp XP · Ур. $lvl · $into/$need'
+                  : 'Ур. $lvl · ${store.minerTitle}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFFFE082),
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              tip,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              hook,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: const Color(0xFF81C784).withValues(alpha: 0.95),
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -393,7 +393,7 @@ class ProgressStore {
   }
 
   /// Apply run stats. Returns newly completed mission titles + new skin names.
-  Future<({List<String> missions, List<String> skins, bool weekly})>
+  Future<({List<String> missions, List<String> skins, bool weekly, int xp})>
       applyRunProgress({
     required double distance,
     required int gold,
@@ -484,7 +484,7 @@ class ProgressStore {
       skins.addAll(await _tryUnlockFromWeekly());
     }
 
-    return (missions: newly, skins: skins, weekly: weeklyJust);
+    return (missions: newly, skins: skins, weekly: weeklyJust, xp: xpGain);
   }
 
   /// Live peek during a run (no persist).

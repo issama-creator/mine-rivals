@@ -34,6 +34,7 @@ class _HudOverlayState extends State<HudOverlay> {
   int _lastMagnetSec = -1;
   bool _lastYouLead = true;
   int _lastThiefGap = -1;
+  bool _lastCanFinish = false;
   bool _lastBurst = false;
   bool _lastBreath = false;
   int _lastHearts = -1;
@@ -61,6 +62,7 @@ class _HudOverlayState extends State<HudOverlay> {
           GameConfig.corridorAssetCount;
       final lead = g.lead.logicalLeader == Leader.player;
       final thiefGap = g.thiefGapMeters;
+      final canFinish = g.canClaimFinish;
       final banner = g.bannerText;
       final magnetSec = g.magnetPowerSeconds.ceil();
       final burst = g.isThiefBursting;
@@ -78,6 +80,7 @@ class _HudOverlayState extends State<HudOverlay> {
           shaft == _lastShaft &&
           lead == _lastYouLead &&
           thiefGap == _lastThiefGap &&
+          canFinish == _lastCanFinish &&
           banner == _lastBanner &&
           magnetSec == _lastMagnetSec &&
           burst == _lastBurst &&
@@ -97,6 +100,7 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastShaft = shaft;
       _lastYouLead = lead;
       _lastThiefGap = thiefGap;
+      _lastCanFinish = canFinish;
       _lastBanner = banner;
       _lastMagnetSec = magnetSec;
       _lastBurst = burst;
@@ -171,6 +175,16 @@ class _HudOverlayState extends State<HudOverlay> {
                       filled: true,
                       onTap: () => Navigator.pop(context, 'resume'),
                     ),
+                    if (game.canClaimFinish) ...[
+                      const SizedBox(height: 10),
+                      _PauseAction(
+                        label: 'Финиш — забрать кристаллы',
+                        icon: Icons.emoji_events_rounded,
+                        filled: true,
+                        accent: const Color(0xFF66BB6A),
+                        onTap: () => Navigator.pop(context, 'finish'),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     _PauseAction(
                       label: 'Закончить игру',
@@ -197,6 +211,8 @@ class _HudOverlayState extends State<HudOverlay> {
     if (!mounted) return;
 
     switch (action) {
+      case 'finish':
+        game.claimVictoryFinish();
       case 'end':
         game.endRunEarly();
       case 'menu':
@@ -293,19 +309,24 @@ class _HudOverlayState extends State<HudOverlay> {
                               GameConfig.corridorSegmentMeters,
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          youLead
-                              ? 'Ты впереди'
-                              : 'Вор +${game.thiefGapMeters} м',
+                        AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 180),
                           style: TextStyle(
                             color: youLead
                                 ? const Color(0xFF81C784)
                                 : const Color(0xFFFF8A65),
-                            fontSize: youLead ? 11 : 13,
-                            fontWeight: FontWeight.w800,
+                            fontSize: youLead ? 11 : 14,
+                            fontWeight: FontWeight.w900,
                             shadows: const [
                               Shadow(color: Colors.black54, blurRadius: 3),
                             ],
+                          ),
+                          child: Text(
+                            youLead
+                                ? (game.canClaimFinish
+                                    ? 'Пауза → Финиш!'
+                                    : 'Ты впереди')
+                                : 'Вор +${game.thiefGapMeters} м',
                           ),
                         ),
                       ],
@@ -621,15 +642,18 @@ class _PauseAction extends StatelessWidget {
     required this.icon,
     required this.filled,
     required this.onTap,
+    this.accent,
   });
 
   final String label;
   final IconData icon;
   final bool filled;
   final VoidCallback onTap;
+  final Color? accent;
 
   @override
   Widget build(BuildContext context) {
+    final fill = accent ?? const Color(0xFFFFB300);
     return SizedBox(
       width: double.infinity,
       height: 48,
@@ -642,7 +666,7 @@ class _PauseAction extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFFFB300),
+                backgroundColor: fill,
                 foregroundColor: const Color(0xFF3E2723),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),

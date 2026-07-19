@@ -247,7 +247,7 @@ class GameConfig {
   static const double goldSnapPullSpeed = 460;
 
   // ── Subway-style magnet power-up ─────────────────────────────────────────
-  static const double magnetDisplaySize = 44;
+  static const double magnetDisplaySize = 50;
   static const double magnetPowerDuration = 15;
   /// Wide vacuum while the power-up is active (skips bomb/web).
   static const double powerMagnetRadius = 210;
@@ -258,7 +258,7 @@ class GameConfig {
   static const double magnetRespawnMax = 38;
 
   // ── Hearts (stack to 3 — shield vs pit / spikes; also absorbs bomb) ─────
-  static const double heartDisplaySize = 40;
+  static const double heartDisplaySize = 46;
   static const int maxHearts = 3;
   /// Can drop more than once per run until stack is full (pickup soft-caps).
   static const double heartSpawnChance = 0.12;
@@ -267,7 +267,7 @@ class GameConfig {
   static const double heartIFrameSec = 0.45;
 
   // ── Potion boost (1 per run — answer thief lead) ─────────────────────────
-  static const double potionDisplaySize = 40;
+  static const double potionDisplaySize = 46;
   static const double potionSpawnChance = 0.05;
   static const double potionRespawnMin = 48;
   static const double potionBoostDuration = 2.5;
@@ -296,6 +296,12 @@ class GameConfig {
   static const double laneTrapSpacingSec = 2.6;
   /// Combo difficulty steps every N meters (with run tempo).
   static const double trapComboTierMeters = 200;
+  /// Soft start: lethal set-piece combos (tier 2+) unlock after this.
+  static const double lethalComboUnlockMeters = 380;
+  /// Bomb→spikes teaching combo unlock (after opening).
+  static const double teachComboUnlockMeters = 200;
+  /// Claim victory with Финиш when leading crystals past this distance.
+  static const double finishMinMeters = 150;
   /// Rare combo: web → pit (legacy; prefer [webPitComboChanceAt]).
   static const double webPitComboChance = 0.045;
   static const double webPitComboCooldownMin = 18;
@@ -343,8 +349,8 @@ class GameConfig {
   static const double pitCatchRadius = 22;
   /// Legacy base — prefer [pitSpawnChanceAt].
   static const double pitSpawnChance = 0.10;
-  /// No lethal floors in the opening stretch (teach jewels / bombs first).
-  static const double pitUnlockProgress = 0.14;
+  /// No pits until ~250 m (teach jewels / bombs / spikes / heart first).
+  static const double pitUnlockProgress = 0.22;
   static const double pitRespawnMin = 12.0;
   static const double pitRespawnMax = 20.0;
   /// Suck-into-pit cinematic length (seconds).
