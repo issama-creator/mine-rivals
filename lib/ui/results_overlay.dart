@@ -45,7 +45,8 @@ class _ResultsOverlayState extends State<ResultsOverlay>
     final game = widget.game;
     final s = game.stats;
     final failed = game.failedRun;
-    final win = !failed && s.playerWins;
+    final thiefFinish = game.finishedByThiefChoice;
+    final win = !failed && !thiefFinish && s.playerWins;
     final you = s.player.rareTotal;
     final thief = s.thief.rareTotal;
     final title = game.finishHeadline;
@@ -329,7 +330,7 @@ class _MetaPull extends StatelessWidget {
     final tip = failed
         ? 'Сердце спасает · монеты догоняют вора'
         : (win
-            ? 'Веди по кристаллам и жми Финиш'
+            ? 'Веди по кристаллам — забери на 700 м'
             : 'Собери больше камней, чем вор');
 
     return DecoratedBox(

@@ -10,6 +10,7 @@ import '../systems/game_settings.dart';
 import '../systems/progress_store.dart';
 import '../ui/game_loading_screen.dart';
 import '../ui/hud_overlay.dart';
+import '../ui/checkpoint_overlay.dart';
 import '../ui/results_overlay.dart';
 import '../ui/tutorial_overlay.dart';
 
@@ -236,7 +237,7 @@ class _MenuScreenState extends State<MenuScreen>
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            'Больше кристаллов, чем у вора —\nи жми Финиш!',
+                            'Больше кристаллов, чем у вора —\nзабери на чекпоинте 700 м!',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.85),
@@ -1553,6 +1554,8 @@ class _GameScreenState extends State<GameScreen> {
           'hud': (context, MineRivalsGame g) => HudOverlay(game: g),
           'results': (context, MineRivalsGame g) => ResultsOverlay(game: g),
           'tutorial': (context, MineRivalsGame g) => TutorialOverlay(game: g),
+          'checkpoint': (context, MineRivalsGame g) =>
+              CheckpointOverlay(game: g),
         },
         initialActiveOverlays: const ['hud'],
       ),

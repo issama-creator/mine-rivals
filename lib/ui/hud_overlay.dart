@@ -34,7 +34,6 @@ class _HudOverlayState extends State<HudOverlay> {
   int _lastMagnetSec = -1;
   bool _lastYouLead = true;
   int _lastThiefGap = -1;
-  bool _lastCanFinish = false;
   bool _lastBurst = false;
   bool _lastBreath = false;
   int _lastHearts = -1;
@@ -62,7 +61,6 @@ class _HudOverlayState extends State<HudOverlay> {
           GameConfig.corridorAssetCount;
       final lead = g.lead.logicalLeader == Leader.player;
       final thiefGap = g.thiefGapMeters;
-      final canFinish = g.canClaimFinish;
       final banner = g.bannerText;
       final magnetSec = g.magnetPowerSeconds.ceil();
       final burst = g.isThiefBursting;
@@ -80,7 +78,6 @@ class _HudOverlayState extends State<HudOverlay> {
           shaft == _lastShaft &&
           lead == _lastYouLead &&
           thiefGap == _lastThiefGap &&
-          canFinish == _lastCanFinish &&
           banner == _lastBanner &&
           magnetSec == _lastMagnetSec &&
           burst == _lastBurst &&
@@ -100,7 +97,6 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastShaft = shaft;
       _lastYouLead = lead;
       _lastThiefGap = thiefGap;
-      _lastCanFinish = canFinish;
       _lastBanner = banner;
       _lastMagnetSec = magnetSec;
       _lastBurst = burst;
@@ -175,16 +171,6 @@ class _HudOverlayState extends State<HudOverlay> {
                       filled: true,
                       onTap: () => Navigator.pop(context, 'resume'),
                     ),
-                    if (game.canClaimFinish) ...[
-                      const SizedBox(height: 10),
-                      _PauseAction(
-                        label: 'Финиш — забрать кристаллы',
-                        icon: Icons.emoji_events_rounded,
-                        filled: true,
-                        accent: const Color(0xFF66BB6A),
-                        onTap: () => Navigator.pop(context, 'finish'),
-                      ),
-                    ],
                     const SizedBox(height: 10),
                     _PauseAction(
                       label: 'Закончить игру',
@@ -211,8 +197,6 @@ class _HudOverlayState extends State<HudOverlay> {
     if (!mounted) return;
 
     switch (action) {
-      case 'finish':
-        game.claimVictoryFinish();
       case 'end':
         game.endRunEarly();
       case 'menu':
@@ -323,9 +307,7 @@ class _HudOverlayState extends State<HudOverlay> {
                           ),
                           child: Text(
                             youLead
-                                ? (game.canClaimFinish
-                                    ? 'Пауза → Финиш!'
-                                    : 'Ты впереди')
+                                ? 'Ты впереди · чекпоинт 700 м'
                                 : 'Вор +${game.thiefGapMeters} м',
                           ),
                         ),

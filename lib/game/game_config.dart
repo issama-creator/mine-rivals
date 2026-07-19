@@ -300,8 +300,8 @@ class GameConfig {
   static const double lethalComboUnlockMeters = 380;
   /// Bomb→spikes teaching combo unlock (after opening).
   static const double teachComboUnlockMeters = 200;
-  /// Claim victory with Финиш when leading crystals past this distance.
-  static const double finishMinMeters = 150;
+  /// Every N meters: offer Finish vs Risk; if thief leads crystals he claims.
+  static const double finishCheckpointMeters = 700;
   /// Rare combo: web → pit (legacy; prefer [webPitComboChanceAt]).
   static const double webPitComboChance = 0.045;
   static const double webPitComboCooldownMin = 18;

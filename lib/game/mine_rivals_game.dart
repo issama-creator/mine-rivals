@@ -186,10 +186,15 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   bool failedBySpikes = false;
   /// Player claimed win via Финиш while leading crystals.
   bool finishedByChoice = false;
+  /// Thief claimed finish at a checkpoint while leading crystals.
+  bool finishedByThiefChoice = false;
   /// XP earned last commit (results / menu meta).
   int lastRunXpGain = 0;
   /// Gap banners while thief is far ahead.
   int _lastGapBannerAt = 0;
+  /// Next distance where Finish vs Risk is offered (or thief claims).
+  double _nextCheckpointM = GameConfig.finishCheckpointMeters;
+  bool _checkpointOpen = false;
   bool _taughtMagnet = false;
   bool _taughtHeart = false;
   bool _taughtPotion = false;
@@ -396,15 +401,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
   }
 
-  /// Crystal lead + enough meters → can claim Финиш victory.
-  bool get canClaimFinish =>
-      !finished &&
-      !_finishBeat &&
-      !_pitSucking &&
-      !failedRun &&
-      !inChaseIntro &&
-      stats.playerWins &&
-      distance >= GameConfig.finishMinMeters;
+  double get checkpointStepMeters => GameConfig.finishCheckpointMeters;
 
   @override
   void update(double dt) {
@@ -467,6 +464,8 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
     _syncCorridorTheme();
     _syncExtraThieves();
+    _updateFinishCheckpoints();
+    if (_checkpointOpen || finished) return;
 
     _updateThiefBurst(step);
     _updateLeadDebt(step);
@@ -1826,6 +1825,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   /// Emotional results copy.
   String get finishHeadline {
     if (failedByThiefEscape) return 'ВОР УШЁЛ!';
+    if (finishedByThiefChoice) return 'ВОР НАЖАЛ ФИНИШ!';
     if (failedRun) {
       return failedBySpikes ? 'УМЕР ОТ ШИПОВ!' : 'УПАЛ В ЯМУ!';
     }
@@ -1841,6 +1841,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (failedByThiefEscape) {
       return 'Догоняй, пока его видно — $meters м';
     }
+    if (finishedByThiefChoice) {
+      return 'У вора больше кристаллов · $you–$thief · $meters м';
+    }
     if (failedRun) {
       return failedBySpikes
           ? 'Сердце спасает от шипов — $meters м'
@@ -1853,6 +1856,80 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       return 'Кристаллы $you–$thief · $meters м';
     }
     return 'Кристаллы $you–$thief · $meters м';
+  }
+
+  /// Every [GameConfig.finishCheckpointMeters]: cash out or risk; thief claims if ahead.
+  void _updateFinishCheckpoints() {
+    if (finished ||
+        _finishBeat ||
+        _pitSucking ||
+        _checkpointOpen ||
+        inChaseIntro) {
+      return;
+    }
+    if (distance < _nextCheckpointM) return;
+
+    _checkpointOpen = true;
+    pauseEngine();
+    overlays.remove('pause');
+
+    final you = stats.player.rareTotal;
+    final thief = stats.thief.rareTotal;
+    if (thief > you) {
+      _claimThiefCheckpointFinish();
+      return;
+    }
+
+    audio.play('combo');
+    overlays.add('checkpoint');
+  }
+
+  /// Player takes crystals at the checkpoint (must lead).
+  void acceptCheckpointFinish() {
+    if (!_checkpointOpen || finished || !stats.playerWins) return;
+    overlays.remove('checkpoint');
+    _checkpointOpen = false;
+    audio.play('combo');
+    _pulseBanner('Финиш!', const Color(0xFF81C784));
+    endRunEarly(asVictory: true);
+  }
+
+  /// Skip cash-out; next gate in another 700 m — thief may finish if he leads there.
+  void riskCheckpointContinue() {
+    if (!_checkpointOpen || finished) return;
+    overlays.remove('checkpoint');
+    _checkpointOpen = false;
+    _nextCheckpointM += GameConfig.finishCheckpointMeters;
+    final next = _nextCheckpointM.round();
+    _pulseBanner('Риск! След. $next м', const Color(0xFFFFB300));
+    if (!finished && !_pitSucking) {
+      resumeEngine();
+    }
+  }
+
+  void _claimThiefCheckpointFinish() {
+    if (finished || _finishBeat) return;
+    finished = true;
+    failedRun = false;
+    failedByThiefEscape = false;
+    failedBySpikes = false;
+    finishedByChoice = false;
+    finishedByThiefChoice = true;
+    _checkpointOpen = false;
+    _thiefEscapeTimer = 0;
+    _finishBeat = false;
+    _webSnareTimer = 0;
+    _magnetPowerTimer = 0;
+    _goldStreak = 0;
+    _jewelStreak = 0;
+    _playRate = 1;
+    audio.play('steal');
+    _pulseBanner('Вор — Финиш!', const Color(0xFFFF7043));
+    unawaited(_commitDailyProgress());
+    pauseEngine();
+    overlays.remove('checkpoint');
+    overlays.remove('pause');
+    overlays.add('results');
   }
 
   /// Thief far ahead / off-screen for [GameConfig.thiefEscapeSeconds].
@@ -1997,24 +2074,16 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
   /// Pause for in-run menu sheet.
   void pauseForMenu() {
-    if (finished || _finishBeat) return;
+    if (finished || _finishBeat || _checkpointOpen) return;
     pauseEngine();
   }
 
   void resumeFromMenu() {
-    if (finished || _finishBeat) return;
+    if (finished || _finishBeat || _checkpointOpen) return;
     resumeEngine();
   }
 
-  /// Claim victory while leading crystals (Финиш).
-  void claimVictoryFinish() {
-    if (!canClaimFinish) return;
-    audio.play('combo');
-    _pulseBanner('Финиш!', const Color(0xFF81C784));
-    endRunEarly(asVictory: true);
-  }
-
-  /// End the run early and show results (forfeit / Финиш / quit from menu).
+  /// End the run early and show results (forfeit / checkpoint Финиш / quit).
   void endRunEarly({bool asVictory = false}) {
     if (finished || _finishBeat) return;
     finished = true;
@@ -2022,6 +2091,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     failedByThiefEscape = false;
     failedBySpikes = false;
     finishedByChoice = asVictory;
+    finishedByThiefChoice = false;
+    _checkpointOpen = false;
+    overlays.remove('checkpoint');
     _thiefEscapeTimer = 0;
     _finishBeat = false;
     _webSnareTimer = 0;
@@ -2037,6 +2109,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   void restart() {
     overlays.remove('results');
     overlays.remove('pause');
+    overlays.remove('checkpoint');
     for (final e in List<FallingItem>.of(liveItems)) {
       _releaseLiveItem(e);
     }
@@ -2135,6 +2208,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     failedByThiefEscape = false;
     failedBySpikes = false;
     finishedByChoice = false;
+    finishedByThiefChoice = false;
+    _nextCheckpointM = GameConfig.finishCheckpointMeters;
+    _checkpointOpen = false;
     lastRunXpGain = 0;
     _lastGapBannerAt = 0;
     _taughtMagnet = false;
