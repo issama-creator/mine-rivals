@@ -1,15 +1,48 @@
 import 'package:flutter/material.dart';
 
 import '../game/mine_rivals_game.dart';
+import '../systems/game_settings.dart';
 import '../systems/progress_store.dart';
 
-class ResultsOverlay extends StatelessWidget {
+class ResultsOverlay extends StatefulWidget {
   const ResultsOverlay({super.key, required this.game});
 
   final MineRivalsGame game;
 
   @override
+  State<ResultsOverlay> createState() => _ResultsOverlayState();
+}
+
+class _ResultsOverlayState extends State<ResultsOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _enter;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _enter = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
+    _fade = CurvedAnimation(parent: _enter, curve: Curves.easeOut);
+    _scale = Tween<double>(begin: 0.92, end: 1).animate(
+      CurvedAnimation(parent: _enter, curve: Curves.easeOutBack),
+    );
+    // Finish haptic already fired from the game — keep results visual-only.
+    _enter.forward();
+  }
+
+  @override
+  void dispose() {
+    _enter.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final game = widget.game;
     final s = game.stats;
     final failed = game.failedRun;
     final win = !failed && s.playerWins;
@@ -25,187 +58,196 @@ class ResultsOverlay extends StatelessWidget {
       color: Colors.black.withValues(alpha: 0.78),
       child: SafeArea(
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(28),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF4E342E), Color(0xFF1A100A)],
-                  ),
-                  border: Border.all(
-                    color: const Color(0xFFFFB300).withValues(alpha: 0.75),
-                    width: 2,
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 28, 22, 22),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: titleColor,
-                          fontSize: 34,
-                          fontWeight: FontWeight.w900,
-                          height: 1.05,
-                        ),
+          child: FadeTransition(
+            opacity: _fade,
+            child: ScaleTransition(
+              scale: _scale,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(28),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF4E342E), Color(0xFF1A100A)],
                       ),
-                      const SizedBox(height: 10),
-                      Text(
-                        subtitle,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      border: Border.all(
+                        color: const Color(0xFFFFB300).withValues(alpha: 0.75),
+                        width: 2,
                       ),
-                      const SizedBox(height: 24),
-                      Row(
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(22, 28, 22, 22),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Expanded(
-                            child: _scoreBox(
-                              'ТЫ',
-                              you,
-                              const Color(0xFF4FC3F7),
-                              win,
+                          Text(
+                            title,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: titleColor,
+                              fontSize: 34,
+                              fontWeight: FontWeight.w900,
+                              height: 1.05,
                             ),
                           ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            child: Text(
-                              'против',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.4),
-                                fontWeight: FontWeight.w800,
-                                fontSize: 14,
+                          const SizedBox(height: 10),
+                          Text(
+                            subtitle,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.75),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _scoreBox(
+                                  'ТЫ',
+                                  you,
+                                  const Color(0xFF4FC3F7),
+                                  win,
+                                ),
+                              ),
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                child: Text(
+                                  'против',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: _scoreBox(
+                                  'ВОР',
+                                  thief,
+                                  const Color(0xFFEF5350),
+                                  !win,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            'Обгоны: ты ${game.playerOvertakes} · вор ${game.thiefOvertakes}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.55),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (game.newDistanceRecord || game.newRaresRecord) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              [
+                                if (game.newDistanceRecord)
+                                  'Новый рекорд дистанции!',
+                                if (game.newRaresRecord)
+                                  'Новый рекорд кристаллов!',
+                              ].join('\n'),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFFFFD54F),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                                height: 1.25,
                               ),
                             ),
-                          ),
-                          Expanded(
-                            child: _scoreBox(
-                              'ВОР',
-                              thief,
-                              const Color(0xFFEF5350),
-                              !win,
+                          ],
+                          const SizedBox(height: 10),
+                          Text(
+                            '${game.distance.round()} м · '
+                            '${GameSettings.instance.runMode.titleRu}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.7),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        'Обгоны: ты ${game.playerOvertakes} · вор ${game.thiefOvertakes}',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.55),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (game.newDistanceRecord || game.newRaresRecord) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          [
-                            if (game.newDistanceRecord) 'Новый рекорд дистанции!',
-                            if (game.newRaresRecord) 'Новый рекорд кристаллов!',
-                          ].join('\n'),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Color(0xFFFFD54F),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
-                            height: 1.25,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 10),
-                      Text(
-                        'Рекорд: ${ProgressStore.instance.bestDistanceMeters} м · '
-                        '${ProgressStore.instance.bestRares} крист.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.45),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        win
-                            ? 'Ещё разок — не дай вору отыграться!'
-                            : 'Лови кристаллы — и обойди его в следующий раз!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: const Color(0xFFFFE082).withValues(alpha: 0.9),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 56,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            gradient: const LinearGradient(
-                              colors: [
-                                Color(0xFFFFD54F),
-                                Color(0xFFFFB300),
-                              ],
+                          const SizedBox(height: 4),
+                          Text(
+                            'Рекорд режима: '
+                            '${ProgressStore.instance.bestDistanceFor(GameSettings.instance.runMode)} м',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.45),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
-                              onTap: game.restart,
-                              child: const Center(
-                                child: Text(
-                                  'ИГРАТЬ СНОВА',
-                                  style: TextStyle(
-                                    color: Color(0xFF3E2723),
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 18,
+                          const SizedBox(height: 22),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFFD54F),
+                                    Color(0xFFFFB300),
+                                  ],
+                                ),
+                              ),
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(16),
+                                  onTap: game.restart,
+                                  child: const Center(
+                                    child: Text(
+                                      'ИГРАТЬ СНОВА',
+                                      style: TextStyle(
+                                        color: Color(0xFF3E2723),
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 18,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: OutlinedButton(
-                          onPressed: () => game.onQuitToMenu?.call(),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFFFFE082),
-                            side: BorderSide(
-                              color: const Color(0xFFFFB300).withValues(alpha: 0.5),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: OutlinedButton(
+                              onPressed: () => game.onQuitToMenu?.call(),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFFE082),
+                                side: BorderSide(
+                                  color: const Color(0xFFFFB300)
+                                      .withValues(alpha: 0.5),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              child: const Text(
+                                'В МЕНЮ',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 16,
+                                ),
+                              ),
                             ),
                           ),
-                          child: const Text(
-                            'В МЕНЮ',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),

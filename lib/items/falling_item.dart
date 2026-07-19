@@ -1,13 +1,12 @@
 import 'dart:math';
 
-import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
+import '../effects/ground_shadow.dart';
 import '../game/asset_library.dart';
 import '../game/game_config.dart';
 import '../game/mine_rivals_game.dart';
-import '../player/player_component.dart';
 import 'item_type.dart';
 
 enum ItemMagnet { none, player, thief }
@@ -24,13 +23,14 @@ Vector2 _displaySizeFor(ItemType type) {
     const h = GameConfig.dynamiteCartDisplaySize;
     return Vector2(h * (320 / 298), h);
   }
+  // Square sheet crop — always the same on-screen size.
   if (type.isBomb) return Vector2.all(GameConfig.bombDisplaySize);
   if (type.isWeb) return Vector2.all(GameConfig.webDisplaySize);
   if (type.isMagnet) return Vector2.all(GameConfig.magnetDisplaySize);
   if (type.isSpikes) {
-    // Crop is ~320×183 — wide floor trap.
+    // Art ~3:2 — taller draw so spikes read as sticking up.
     const w = GameConfig.spikesDisplaySize;
-    return Vector2(w, w * (183 / 320));
+    return Vector2(w, w * GameConfig.spikesAspect);
   }
   if (type.isPit) return Vector2.all(GameConfig.pitDisplaySize);
   if (type.isHeart) return Vector2.all(GameConfig.heartDisplaySize);
@@ -38,7 +38,7 @@ Vector2 _displaySizeFor(ItemType type) {
   return Vector2.all(GameConfig.lootDisplaySize);
 }
 
-class FallingItem extends SpriteComponent with CollisionCallbacks {
+class FallingItem extends SpriteComponent {
   FallingItem({
     required this.type,
     required Vector2 position,
@@ -46,8 +46,9 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
   }) : super(
           position: position,
           size: _displaySizeFor(type),
-          anchor: Anchor.center,
-          priority: 30,
+          // Pit/spikes: center on the hole. Everything else: feet on the path.
+          anchor: type.isLethalFloor ? Anchor.center : Anchor.bottomCenter,
+          priority: type.isSpikes ? 34 : 30,
         );
 
   final ItemType type;
@@ -57,6 +58,8 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
   ItemMagnet magnetBy = ItemMagnet.none;
   double life = 0;
   double _pulse = Random().nextDouble() * pi * 2;
+  MineRivalsGame? _game;
+  GroundShadow? _groundShadow;
   final Paint _glowPaint = Paint();
   final Paint _webStrand = Paint()
     ..color = Colors.white.withValues(alpha: 0.78)
@@ -68,8 +71,37 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.0;
   final Paint _webHub = Paint()..color = Colors.white.withValues(alpha: 0.85);
+  final Paint _pitHole = Paint();
+  final Paint _magnetSteel = Paint()..color = const Color(0xFFCFD8DC);
+  final Paint _magnetSteelEdge = Paint()
+    ..color = const Color(0xFF78909C)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.2;
+  final Paint _magnetLeft = Paint()
+    ..color = const Color(0xFFE53935)
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt;
+  final Paint _magnetRight = Paint()
+    ..color = const Color(0xFF1E88E5)
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt;
+  final Paint _heartPaint = Paint()..color = const Color(0xFFFF1744);
+  final Paint _potionGlass = Paint()..color = const Color(0xFF8E24AA);
+  final Paint _potionNeck = Paint()..color = const Color(0xFFCE93D8);
+  final Paint _potionCork = Paint()..color = const Color(0xFFFFD54F);
+  double _pitShaderW = -1;
+  double _pitShaderH = -1;
 
   bool get magnetized => magnetBy != ItemMagnet.none;
+
+  /// Pit/spikes sit by center; loot/bombs/cart stand on the path (feet = position).
+  bool get standsOnGround => !type.isLethalFloor;
+
+  /// Body center for catch / magnet (world Y).
+  double get hitY =>
+      standsOnGround ? position.y - size.y * 0.52 : position.y;
+
+  double get hitX => position.x;
 
   void recycle({
     required Vector2 newPosition,
@@ -85,23 +117,32 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     // Corridor may have swapped jewel art since this instance was pooled.
     sprite = _spriteForType(type);
     size = _displaySizeFor(type);
+    anchor = type.isLethalFloor ? Anchor.center : Anchor.bottomCenter;
+    _syncGroundShadow();
   }
 
   void refreshSprite() {
     sprite = _spriteForType(type);
     size = _displaySizeFor(type);
+    anchor = type.isLethalFloor ? Anchor.center : Anchor.bottomCenter;
+    _syncGroundShadow();
   }
 
   void applyBombSpeedScale(double paceRatio) {
-    if (!type.isExplosive) return;
-    final t = ((paceRatio - 1.0) / 0.9).clamp(0.0, 1.0);
-    final scale = 1.0 +
-        (GameConfig.bombSpeedScaleMax - 1.0) * t;
-    size = _displaySizeFor(type) * scale;
+    // Disabled — pace scaling made a second “wrong size” bomb look.
+    size = _displaySizeFor(type);
   }
 
-  /// Web/magnet drawn procedurally but Flame still requires a non-null sprite.
+  /// Web/magnet/pit drawn procedurally; Flame still wants a non-null sprite.
   static Sprite? _spriteForType(ItemType type) {
+    if (type.isSpikes || type.isDynamiteCart) {
+      // Only real hazard PNG — never gold/bomb (that drew spikes as coins).
+      if (AssetLibrary.hasRealHazardArt(type)) {
+        return AssetLibrary.items[type];
+      }
+      // Invisible placeholder; render path draws procedural spikes / skips cart.
+      return AssetLibrary.items[ItemType.gold];
+    }
     final direct = AssetLibrary.items[type];
     if (direct != null) return direct;
     if (type.isWeb ||
@@ -139,58 +180,67 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
 
   @override
   Future<void> onLoad() async {
-    await AssetLibrary.ensureLoaded();
+    if (!AssetLibrary.ready) {
+      await AssetLibrary.ensureLoaded(prefetchRest: false);
+    }
     sprite = _spriteForType(type);
     // Flame mounts only after onLoad — never leave sprite null.
     assert(sprite != null, 'Missing sprite for $type');
-    if (children.whereType<CircleHitbox>().isEmpty) {
-      add(
-        CircleHitbox(
-          radius: size.x * (type.isExplosive ? 0.38 : 0.55),
-          // Passive: no loot↔loot pairs — catch is distance/magnet driven.
-          collisionType: CollisionType.passive,
-        ),
-      );
+    if (standsOnGround) {
+      final shadow = GroundShadow();
+      _groundShadow = shadow;
+      await add(shadow);
+      _syncGroundShadow();
     }
+    // Catch is distance-driven in MineRivalsGame — no Flame hitboxes.
+  }
+
+  void _syncGroundShadow() {
+    final shadow = _groundShadow;
+    if (shadow == null) return;
+    // Feet blob — plants bomb/loot on the cobbles.
+    final w = type.isDynamiteCart
+        ? size.x * 0.85
+        : (type.isBomb ? size.x * 0.72 : size.x * 0.55);
+    shadow.size.setValues(w, size.y * 0.14);
+    shadow.position.setValues(size.x * 0.5, size.y - 1);
+  }
+
+  @override
+  void onMount() {
+    super.onMount();
+    final g = findGame();
+    if (g is MineRivalsGame) _game = g;
   }
 
   @override
   void update(double dt) {
     super.update(dt);
     if (collected || stolen) return;
+    // Lock bomb size — pooled / hot-reload leftovers must not look different.
+    if (type.isBomb) {
+      final s = GameConfig.bombDisplaySize;
+      if (size.x != s || size.y != s) size.setValues(s, s);
+      scale.setValues(1, 1);
+    }
     // Safety: thief magnet can never stick on non-jewels.
     if (!type.isJewel && magnetBy == ItemMagnet.thief) {
       magnetBy = ItemMagnet.none;
     }
     life += dt;
-    final game = findGame();
     // background.speed already includes playRate — don't multiply again.
-    final worldSpeed =
-        game is MineRivalsGame ? game.background.speed : fallSpeed;
+    final scroll = _game?.background.speed ?? fallSpeed;
+    final worldSpeed = type.isDynamiteCart
+        ? scroll * GameConfig.dynamiteCartSpeedMult
+        : scroll;
     if (!magnetized) {
       position.y += worldSpeed * dt;
     } else {
       position.y += worldSpeed * 0.35 * dt;
     }
-    _pulse += dt * 4;
-  }
-
-  @override
-  void onCollisionStart(
-    Set<Vector2> intersectionPoints,
-    PositionComponent other,
-  ) {
-    super.onCollisionStart(intersectionPoints, other);
-    // Hazards (bomb/web) use the tight distance gate — not fat hitboxes.
-    if (type.isHazard) return;
-    // Only the player basket collects via collision — thief has no hitbox.
-    final owner = other is PlayerComponent ? other : other.parent;
-    if (owner is PlayerComponent) {
-      final game = findGame();
-      if (game is MineRivalsGame) {
-        game.onItemCaught(this);
-      }
-    }
+    _pulse += dt * (type.isBomb
+        ? 0.22
+        : (type.isExplosive || type.isSpikes ? 0.85 : 4));
   }
 
   @override
@@ -198,8 +248,8 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     if (type.isJewel) {
       final pulse = 0.55 + 0.2 * sin(_pulse);
       final c = Offset(size.x / 2, size.y * 0.52);
-      final game = findGame();
-      final thiefThreat = game is MineRivalsGame &&
+      final game = _game;
+      final thiefThreat = game != null &&
           !game.lead.playerLeads &&
           !game.hasMagnetPower;
       if (thiefThreat || magnetBy == ItemMagnet.thief) {
@@ -238,34 +288,80 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     }
 
     if (type.isPit) {
+      // Procedural hole only — never blit the bomb placeholder sprite.
       _renderPit(canvas);
       return;
     }
 
-    if (type.isExplosive) {
-      // Hotter pulse so explosives read at high scroll speed.
-      final warn = 0.55 + 0.45 * sin(_pulse * 2.1);
-      final c = Offset(size.x / 2, size.y / 2);
-      final hot = type.isDynamiteCart
-          ? const Color(0xFFFF6D00)
-          : const Color(0xFFFF1744);
-      _glowPaint.color = hot.withValues(alpha: 0.22 + warn * 0.32);
-      canvas.drawCircle(c, size.x * (0.48 + warn * 0.12), _glowPaint);
-      _glowPaint.color =
-          const Color(0xFFFF9100).withValues(alpha: 0.14 + warn * 0.2);
-      canvas.drawCircle(c, size.x * (0.28 + warn * 0.06), _glowPaint);
+    if (type.isSpikes) {
+      if (AssetLibrary.hasRealHazardArt(ItemType.spikes) &&
+          _spriteIs(AssetLibrary.items[ItemType.spikes])) {
+        super.render(canvas);
+      } else {
+        // Never blit coin/bomb placeholder as spikes.
+        _renderSpikesFallback(canvas);
+      }
+      return;
     }
 
-    if (type.isSpikes) {
-      final warn = 0.5 + 0.35 * sin(_pulse * 1.7);
-      final c = Offset(size.x / 2, size.y * 0.62);
-      _glowPaint.color =
-          const Color(0xFFFF6D00).withValues(alpha: 0.16 + warn * 0.22);
-      canvas.drawCircle(c, size.x * (0.36 + warn * 0.06), _glowPaint);
+    if (type.isDynamiteCart &&
+        !(AssetLibrary.hasRealHazardArt(ItemType.dynamiteCart) &&
+            _spriteIs(AssetLibrary.items[ItemType.dynamiteCart]))) {
+      // Missing cart art — crate stub, never a coin.
+      final body = Paint()..color = const Color(0xFF5D4037);
+      final rim = Paint()
+        ..color = const Color(0xFFFF7043)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      final r = Rect.fromLTWH(size.x * 0.12, size.y * 0.28, size.x * 0.76, size.y * 0.55);
+      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(6)), body);
+      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(6)), rim);
+      return;
     }
 
     // Plain sprite blit — no ColorFilter saveLayer (FPS).
+    // Ground shadow (child) plants standing items; no floating red disc.
     super.render(canvas);
+  }
+
+  bool _spriteIs(Sprite? other) {
+    final s = sprite;
+    if (s == null || other == null) return false;
+    return identical(s.image, other.image) &&
+        s.srcPosition == other.srcPosition &&
+        s.srcSize == other.srcSize;
+  }
+
+  /// Drawn only if spikes.png failed to load — never show a bomb / lava disc.
+  void _renderSpikesFallback(Canvas canvas) {
+    final c = Offset(size.x / 2, size.y * 0.68);
+    // Dark hole, not a glowing circle.
+    _glowPaint.color = const Color(0xFF0D0D0D);
+    canvas.drawOval(
+      Rect.fromCenter(center: c, width: size.x * 0.42, height: size.y * 0.28),
+      _glowPaint,
+    );
+    final spike = Paint()..color = const Color(0xFF78909C);
+    final edge = Paint()
+      ..color = const Color(0xFF37474F)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    for (var i = 0; i < 10; i++) {
+      final a = (i / 10) * pi * 2 - pi / 2;
+      final baseR = size.x * 0.16;
+      final tipR = size.x * 0.46;
+      final tip = Offset(
+        c.dx + cos(a) * tipR * 0.55,
+        c.dy + sin(a) * tipR * 0.22 - size.y * 0.42,
+      );
+      final path = Path()
+        ..moveTo(c.dx + cos(a - 0.22) * baseR, c.dy + sin(a - 0.22) * baseR * 0.45)
+        ..lineTo(tip.dx, tip.dy)
+        ..lineTo(c.dx + cos(a + 0.22) * baseR, c.dy + sin(a + 0.22) * baseR * 0.45)
+        ..close();
+      canvas.drawPath(path, spike);
+      canvas.drawPath(path, edge);
+    }
   }
 
   /// Lightweight sticky web (6 spokes, 2 rings).
@@ -289,17 +385,15 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
     canvas.drawCircle(c, 2.0, _webHub);
   }
 
-  /// Black sinkhole on the path — static oval, no pulse.
+  /// Soft dark oval sinkhole (approved look) — separate from spikes art.
   void _renderPit(Canvas canvas) {
     final c = Offset(size.x / 2, size.y / 2);
     final rx = size.x * 0.48;
     final ry = size.y * 0.34;
-    final rim = Paint()
-      ..color = const Color(0xFF5D4037).withValues(alpha: 0.7)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2;
-    final hole = Paint()
-      ..shader = RadialGradient(
+    if (size.x != _pitShaderW || size.y != _pitShaderH) {
+      _pitShaderW = size.x;
+      _pitShaderH = size.y;
+      _pitHole.shader = RadialGradient(
         colors: const [
           Color(0xFF000000),
           Color(0xFF1A1A1A),
@@ -307,45 +401,65 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
         ],
         stops: const [0.15, 0.55, 1],
       ).createShader(Rect.fromCenter(center: c, width: rx * 2, height: ry * 2));
-    canvas.drawOval(Rect.fromCenter(center: c, width: rx * 2, height: ry * 2), hole);
-    canvas.drawOval(Rect.fromCenter(center: c, width: rx * 2, height: ry * 2), rim);
-    _glowPaint.color = Colors.black.withValues(alpha: 0.35);
+    }
+    final oval = Rect.fromCenter(center: c, width: rx * 2, height: ry * 2);
+    canvas.drawOval(oval, _pitHole);
+    _glowPaint.color = Colors.black.withValues(alpha: 0.28);
     canvas.drawOval(
-      Rect.fromCenter(center: c, width: rx * 1.35, height: ry * 1.35),
+      Rect.fromCenter(center: c, width: rx * 1.2, height: ry * 1.2),
       _glowPaint,
     );
   }
 
-  /// Simple horseshoe magnet — readable at loot size without a sheet crop.
+  /// Classic U horseshoe — red / blue body, steel tips (reads at ~44px).
   void _renderMagnet(Canvas canvas) {
-    final c = Offset(size.x / 2, size.y / 2);
-    final pulse = 0.55 + 0.2 * sin(_pulse * 1.4);
+    final w = size.x;
+    final h = size.y;
+    final cx = w * 0.5;
+    final pulse = 0.55 + 0.15 * sin(_pulse * 1.25);
     _glowPaint.color =
-        const Color(0xFF29B6F6).withValues(alpha: 0.22 + pulse * 0.18);
-    canvas.drawCircle(c, size.x * 0.46, _glowPaint);
-
-    final body = Paint()
-      ..color = const Color(0xFF039BE5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size.x * 0.22
-      ..strokeCap = StrokeCap.butt;
-    final tip = Paint()..color = const Color(0xFFE53935);
-    final tipB = Paint()..color = const Color(0xFF1E88E5);
-
-    final r = size.x * 0.28;
-    final rect = Rect.fromCircle(center: c - Offset(0, size.y * 0.04), radius: r);
-    canvas.drawArc(rect, pi * 0.15, pi * 0.7, false, body);
-    // Pole tips
-    canvas.drawCircle(
-      Offset(c.dx - r * 0.95, c.dy + r * 0.35),
-      size.x * 0.11,
-      tip,
+        const Color(0xFF64B5F6).withValues(alpha: 0.12 + pulse * 0.1);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(cx, h * 0.62),
+        width: w * 0.78,
+        height: h * 0.22,
+      ),
+      _glowPaint,
     );
-    canvas.drawCircle(
-      Offset(c.dx + r * 0.95, c.dy + r * 0.35),
-      size.x * 0.11,
-      tipB,
-    );
+
+    final thick = w * 0.20;
+    final midR = w * 0.28;
+    final top = h * 0.14;
+    final legBot = h * 0.72;
+    final arcCy = top + midR;
+    _magnetLeft.strokeWidth = thick;
+    _magnetRight.strokeWidth = thick;
+
+    final arcRect = Rect.fromCircle(center: Offset(cx, arcCy), radius: midR);
+    canvas.drawArc(arcRect, pi, pi * 0.5, false, _magnetLeft);
+    canvas.drawArc(arcRect, pi * 1.5, pi * 0.5, false, _magnetRight);
+    final lx = cx - midR;
+    final rx = cx + midR;
+    canvas.drawLine(Offset(lx, arcCy), Offset(lx, legBot), _magnetLeft);
+    canvas.drawLine(Offset(rx, arcCy), Offset(rx, legBot), _magnetRight);
+
+    // Steel pole tips — classic magnet feet.
+    final tipW = thick * 1.12;
+    final tipH = h * 0.16;
+    final tipY = legBot + tipH * 0.15;
+    for (final x in [lx, rx]) {
+      final tip = RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(x, tipY),
+          width: tipW,
+          height: tipH,
+        ),
+        const Radius.circular(2.5),
+      );
+      canvas.drawRRect(tip, _magnetSteel);
+      canvas.drawRRect(tip, _magnetSteelEdge);
+    }
   }
 
   void _renderHeart(Canvas canvas) {
@@ -355,7 +469,6 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
         const Color(0xFFFF5252).withValues(alpha: 0.2 + pulse * 0.2);
     canvas.drawCircle(c, size.x * 0.46, _glowPaint);
 
-    final paint = Paint()..color = const Color(0xFFFF1744);
     final path = Path();
     final s = size.x * 0.38;
     path.moveTo(c.dx, c.dy + s * 0.35);
@@ -375,7 +488,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
       c.dx,
       c.dy + s * 0.35,
     );
-    canvas.drawPath(path, paint);
+    canvas.drawPath(path, _heartPaint);
   }
 
   void _renderPotion(Canvas canvas) {
@@ -385,9 +498,6 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
         const Color(0xFFAB47BC).withValues(alpha: 0.22 + pulse * 0.18);
     canvas.drawCircle(c, size.x * 0.46, _glowPaint);
 
-    final glass = Paint()..color = const Color(0xFF8E24AA);
-    final neck = Paint()..color = const Color(0xFFCE93D8);
-    final cork = Paint()..color = const Color(0xFFFFD54F);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
@@ -397,7 +507,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
         ),
         const Radius.circular(10),
       ),
-      glass,
+      _potionGlass,
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
@@ -408,7 +518,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
         ),
         const Radius.circular(4),
       ),
-      neck,
+      _potionNeck,
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
@@ -419,7 +529,7 @@ class FallingItem extends SpriteComponent with CollisionCallbacks {
         ),
         const Radius.circular(3),
       ),
-      cork,
+      _potionCork,
     );
   }
 }

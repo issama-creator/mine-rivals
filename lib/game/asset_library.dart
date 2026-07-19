@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flame/components.dart';
 import 'package:flame/flame.dart';
 import 'package:flame/sprite.dart';
+import 'package:flutter/services.dart';
 
 import '../items/item_type.dart';
 import '../systems/game_settings.dart';
@@ -13,8 +13,8 @@ import 'asset_workers.dart';
 import 'game_config.dart';
 import 'player_skins.dart';
 
-/// Loads PNGs, strips sheet backgrounds to real alpha, slices run cycles.
-/// Heavy pixel work runs in isolates so the menu / loading UI stays responsive.
+/// Loads PNGs and slices run cycles for play. Keep boot staged — menu must
+/// never call this; GameLoadingScreen covers the wait.
 class AssetLibrary {
   AssetLibrary._();
 
@@ -46,12 +46,15 @@ class AssetLibrary {
 
   /// Per corridor: gems for that shaft.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 36;
+  static const int _assetVersion = 57;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
   static final Map<String, Future<void>> _skinFutures = {};
   static Future<void>? _thiefBlueFuture;
+  static bool _prefetchStarted = false;
+  /// Bumps when a new core load starts — stale loads must not write results.
+  static int _loadGen = 0;
 
   static final List<bool> _corridorLoaded =
       List<bool>.filled(GameConfig.corridorAssetCount, false);
@@ -69,8 +72,18 @@ class AssetLibrary {
       corridorJewels.isNotEmpty &&
       _loadedVersion == _assetVersion;
 
-  /// Kick off core load from the menu (non-blocking). Safe to call often.
-  static Future<void> warmUp() => ensureLoaded();
+  /// Optional background warm — never throws to the zone (avoids debugger ANR).
+  static Future<void> warmUp() async {
+    try {
+      await ensureLoaded(prefetchRest: false);
+    } catch (e, st) {
+      assert(() {
+        // ignore: avoid_print
+        print('AssetLibrary.warmUp failed: $e\n$st');
+        return true;
+      }());
+    }
+  }
 
   static SpriteAnimation minerRunForSelected() {
     final id = GameSettings.instance.selectedSkinId;
@@ -85,16 +98,80 @@ class AssetLibrary {
     return corridors[i];
   }
 
-  static Future<void> ensureLoaded() {
-    // Always clear before any load — skins can warm from the menu first.
+  /// Prefetch extra corridors after the run is on screen (never during boot).
+  static void startBackgroundPrefetch() {
+    if (!ready) return;
+    unawaited(() async {
+      try {
+        await _prefetchRemaining();
+      } catch (e, st) {
+        assert(() {
+          // ignore: avoid_print
+          print('Asset prefetch skipped: $e\n$st');
+          return true;
+        }());
+      }
+    }());
+  }
+
+  /// Soft blue-thief load — never throws to the zone (Long mode background).
+  static Future<void> ensureThiefBlueLoadedSafe() async {
+    try {
+      await ensureThiefBlueLoaded();
+    } catch (e, st) {
+      assert(() {
+        // ignore: avoid_print
+        print('Blue thief load skipped: $e\n$st');
+        return true;
+      }());
+    }
+  }
+
+  static Future<void> ensureLoaded({bool prefetchRest = false}) async {
     Flame.images.prefix = '';
     if (ready) {
-      return _ensureSelectedSkin();
+      await _ensureSelectedSkin();
+      if (prefetchRest) startBackgroundPrefetch();
+      return;
     }
-    return _loadFuture ??= _loadCore().catchError((Object e, StackTrace st) {
+
+    // Join in-flight load — never start a second _loadCore (race = hang).
+    final existing = _loadFuture;
+    if (existing != null) {
+      try {
+        await existing;
+      } catch (_) {
+        if (identical(_loadFuture, existing)) _loadFuture = null;
+      }
+      if (ready) {
+        await _ensureSelectedSkin();
+        if (prefetchRest) startBackgroundPrefetch();
+        return;
+      }
+      // Failed / abandoned — bump gen so a late write can't mark ready.
+      _loadGen++;
       _loadFuture = null;
-      Error.throwWithStackTrace(e, st);
-    });
+    }
+
+    final gen = ++_loadGen;
+    final load = _loadCore(gen);
+    _loadFuture = load;
+    try {
+      await load;
+    } catch (_) {
+      if (_loadGen == gen) _loadFuture = null;
+      rethrow;
+    }
+    if (_loadGen != gen) {
+      // Superseded — wait for the newer load if any.
+      final newer = _loadFuture;
+      if (newer != null) await newer;
+    }
+    if (!ready) {
+      _loadFuture = null;
+      throw StateError('AssetLibrary finished but not ready');
+    }
+    if (prefetchRest) startBackgroundPrefetch();
   }
 
   static Future<void> _ensureSelectedSkin() async {
@@ -102,7 +179,7 @@ class AssetLibrary {
     minerRun = minerRunForSelected();
   }
 
-  static Future<void> _loadCore() async {
+  static Future<void> _loadCore(int gen) async {
     items.clear();
     minerRun = null;
     thiefRun = null;
@@ -110,6 +187,7 @@ class AssetLibrary {
     skinRuns.clear();
     _skinFutures.clear();
     _thiefBlueFuture = null;
+    _prefetchStarted = false;
     tunnel = null;
     corridors.clear();
     corridorJewels.clear();
@@ -121,31 +199,117 @@ class AssetLibrary {
     final selected = GameSettings.instance.selectedSkinId;
     final needDefault = selected != PlayerSkins.defaultId;
 
-    // Parallel boot — isolate work + image IO overlap.
-    final results = await Future.wait<Object?>([
-      _loadBlackKeyed('assets/elements.png'),
-      _loadBlackKeyed('assets/images/hazards/dynamite_cart.png'),
-      _loadBlackKeyed('assets/images/hazards/spikes.png'),
-      _loadCorridorSlot(0),
-      _loadJewelSlot(0),
-      _loadThiefPrimary(),
-      ensureSkinLoaded(selected),
-      if (needDefault) ensureSkinLoaded(PlayerSkins.defaultId),
-    ]);
+    bool alive() => _loadGen == gen;
 
-    final elementsImg = results[0]! as ui.Image;
+    // Staged boot — one heavy decode at a time so loading UI stays alive.
+    final elementsImg = await _loadImage('assets/elements.png');
+    if (!alive()) return;
     _sliceElements(elementsImg);
-    items[ItemType.dynamiteCart] = Sprite(results[1]! as ui.Image);
-    items[ItemType.spikes] = Sprite(results[2]! as ui.Image);
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    if (!alive()) return;
+
+    await _loadHazardOrFallback(
+      ItemType.dynamiteCart,
+      'assets/images/hazards/dynamite_cart.png',
+    );
+    if (!alive()) return;
+    await _loadHazardOrFallback(
+      ItemType.spikes,
+      'assets/images/hazards/spikes.png',
+    );
+    if (!alive()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    if (!alive()) return;
+
+    await _loadCorridorSlot(0);
+    if (!alive()) return;
+    await _loadJewelSlot(0);
+    if (!alive()) return;
     applyCorridorJewels(0);
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    if (!alive()) return;
+
+    await _loadThiefPrimary();
+    if (!alive()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    if (!alive()) return;
+    await ensureSkinLoaded(selected);
+    if (!alive()) return;
+    if (needDefault) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (!alive()) return;
+      await ensureSkinLoaded(PlayerSkins.defaultId);
+    }
+    if (!alive()) return;
+
     minerRun = minerRunForSelected();
     _loadedVersion = _assetVersion;
+  }
 
-    unawaited(_prefetchRemaining());
+  static Future<ui.Image> _loadImage(String path) {
+    Flame.images.prefix = '';
+    return Flame.images.load(path).timeout(const Duration(seconds: 12));
+  }
+
+  static Future<void> _loadHazardOrFallback(ItemType type, String path) async {
+    ui.Image? img;
+    // rootBundle first — reliable after pubspec asset adds (stale Flame cache).
+    try {
+      final data = await rootBundle.load(path);
+      final bytes = Uint8List.sublistView(data);
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromList(bytes, completer.complete);
+      img = await completer.future;
+      try {
+        Flame.images.add(path, img);
+      } catch (_) {}
+    } catch (e) {
+      // ignore: avoid_print
+      print('Hazard rootBundle miss ($path): $e');
+    }
+    if (img == null) {
+      try {
+        img = await _loadImage(path);
+      } catch (e) {
+        // ignore: avoid_print
+        print('Hazard Flame load miss ($path): $e');
+      }
+    }
+    if (img != null) {
+      items[type] = Sprite(img);
+      // ignore: avoid_print
+      print('Hazard OK $type ${img.width}x${img.height}');
+      return;
+    }
+    // Never plant gold/bomb here — that made spikes look like coins.
+    items.remove(type);
+    // ignore: avoid_print
+    print('Hazard MISSING $type — no sprite planted');
+  }
+
+  /// True only when [type] has its own hazard PNG (not loot/bomb crop).
+  static bool hasRealHazardArt(ItemType type) {
+    final s = items[type];
+    if (s == null) return false;
+    final gold = items[ItemType.gold];
+    final bomb = items[ItemType.bomb];
+    if (gold != null &&
+        identical(s.image, gold.image) &&
+        s.srcPosition == gold.srcPosition &&
+        s.srcSize == gold.srcSize) {
+      return false;
+    }
+    if (bomb != null &&
+        identical(s.image, bomb.image) &&
+        s.srcPosition == bomb.srcPosition &&
+        s.srcSize == bomb.srcSize) {
+      return false;
+    }
+    return true;
   }
 
   static Future<void> _loadThiefPrimary() async {
-    final thiefImg = await Flame.images.load('assets/images/vors/vor1.png');
+    final thiefImg = await _loadImage('assets/images/vors/vor1.png');
     thiefRun = await _sliceRunAnimationStabilized(
       thiefImg,
       columns: 9,
@@ -155,34 +319,49 @@ class AssetLibrary {
   }
 
   static Future<void> _prefetchRemaining() async {
+    if (_prefetchStarted) return;
+    _prefetchStarted = true;
     for (var i = 1; i < GameConfig.corridorAssetCount; i++) {
-      await _loadCorridorSlot(i);
-      await _loadJewelSlot(i);
-      await Future<void>.delayed(const Duration(milliseconds: 1));
+      try {
+        await _loadCorridorSlot(i);
+        await _loadJewelSlot(i);
+      } catch (_) {
+        // Keep going — missing one shaft must not kill the run.
+        _corridorLoaded[i] = false;
+        _jewelLoaded[i] = false;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 16));
     }
-    await ensureThiefBlueLoaded();
+    await ensureThiefBlueLoadedSafe();
   }
 
   static Future<void> ensureCorridorReady(int index) async {
     final i = index.clamp(0, GameConfig.corridorAssetCount - 1);
-    await Future.wait([
-      _loadCorridorSlot(i),
-      _loadJewelSlot(i),
-    ]);
+    try {
+      await Future.wait([
+        _loadCorridorSlot(i),
+        _loadJewelSlot(i),
+      ]);
+    } catch (_) {
+      // Caller keeps previous corridor art.
+    }
   }
 
   static Future<void> ensureThiefBlueLoaded() {
     if (thiefRunBlue != null) return Future.value();
     return _thiefBlueFuture ??= () async {
-      final thiefBlueImg = await Flame.images.load(
-        'assets/images/vors/vor-blue.png',
-      );
-      thiefRunBlue = await _sliceRunAnimationStabilized(
-        thiefBlueImg,
-        columns: 9,
-        rows: 2,
-        stepTime: 1 / GameConfig.runFps,
-      );
+      try {
+        final thiefBlueImg = await _loadImage('assets/images/vors/vor-blue.png');
+        thiefRunBlue = await _sliceRunAnimationStabilized(
+          thiefBlueImg,
+          columns: 9,
+          rows: 2,
+          stepTime: 1 / GameConfig.runFps,
+        );
+      } catch (_) {
+        _thiefBlueFuture = null;
+        rethrow;
+      }
     }();
   }
 
@@ -190,7 +369,7 @@ class AssetLibrary {
   static Future<void> _loadCorridorSlot(int index) async {
     final i = index.clamp(0, GameConfig.corridorAssetCount - 1);
     if (_corridorLoaded[i]) return;
-    final img = await Flame.images.load('assets/images/bgc/${i + 1}.png');
+    final img = await _loadImage('assets/images/bgc/${i + 1}.png');
     final sprite = Sprite(img);
     while (corridors.length <= i) {
       corridors.add(sprite);
@@ -207,7 +386,7 @@ class AssetLibrary {
     final c = i + 1;
     final loaded = await Future.wait([
       for (var g = 0; g < 5; g++)
-        Flame.images.load('assets/images/kristales/crops/c${c}_$g.png'),
+        _loadImage('assets/images/kristales/crops/c${c}_$g.png'),
     ]);
     for (final img in loaded) {
       gems.add(Sprite(img));
@@ -223,17 +402,20 @@ class AssetLibrary {
   static Future<void> ensureSkinLoaded(String skinId) {
     if (skinRuns.containsKey(skinId)) return Future.value();
     return _skinFutures[skinId] ??= () async {
-      // Paths are absolute from project root — never use Flame's default
-      // `assets/images/` prefix (that produced assets/images/assets/images/...).
-      Flame.images.prefix = '';
-      final skin = PlayerSkins.byId(skinId);
-      final img = await Flame.images.load(skin.sheetAsset);
-      skinRuns[skin.id] = await _sliceRunAnimationStabilized(
-        img,
-        columns: 9,
-        rows: 2,
-        stepTime: 1 / GameConfig.minerRunFps,
-      );
+      try {
+        Flame.images.prefix = '';
+        final skin = PlayerSkins.byId(skinId);
+        final img = await _loadImage(skin.sheetAsset);
+        skinRuns[skin.id] = await _sliceRunAnimationStabilized(
+          img,
+          columns: 9,
+          rows: 2,
+          stepTime: 1 / GameConfig.minerRunFps,
+        );
+      } catch (_) {
+        _skinFutures.remove(skinId);
+        rethrow;
+      }
     }();
   }
 
@@ -251,6 +433,7 @@ class AssetLibrary {
   }
 
   /// Slice run frames off the UI isolate, then decode images on the main isolate.
+  /// Same path as before the crop-by-feet experiment (grounds + stabilizes X).
   static Future<SpriteAnimation> _sliceRunAnimationStabilized(
     ui.Image image, {
     required int columns,
@@ -328,7 +511,8 @@ class AssetLibrary {
     }
 
     final coin = crop(w * 0.38, h * 0.10, w * 0.62, h * 0.50);
-    final bomb = crop(w * 0.68, h * 0.10, w * 0.92, h * 0.52);
+    // Square crop: full round body + fuse, almost no ground bloom.
+    final bomb = crop(w * 0.6862, h * 0.1445, w * 0.9076, h * 0.4766);
     final bar = crop(w * 0.08, h * 0.52, w * 0.32, h * 0.88);
 
     items[ItemType.gold] = coin;
@@ -341,24 +525,10 @@ class AssetLibrary {
     items[ItemType.pit] = bomb;
     items[ItemType.heart] = coin;
     items[ItemType.potion] = coin;
-    items[ItemType.dynamiteCart] ??= bomb;
-    items[ItemType.spikes] ??= bomb;
+    // Hazards must come from hazards/*.png — do NOT plant bomb placeholders
+    // here (that made "spikes" look like bombs and hide the real art).
+    items.remove(ItemType.dynamiteCart);
+    items.remove(ItemType.spikes);
   }
 
-  static Future<ui.Image> _loadBlackKeyed(String path) async {
-    final raw = await Flame.images.load(path);
-    final byteData = await raw.toByteData(format: ui.ImageByteFormat.rawRgba);
-    if (byteData == null) return raw;
-    final src = Uint8List.fromList(byteData.buffer.asUint8List());
-    final keyed = await Isolate.run(() => blackKeyRgba(src));
-    final completer = Completer<ui.Image>();
-    ui.decodeImageFromPixels(
-      keyed,
-      raw.width,
-      raw.height,
-      ui.PixelFormat.rgba8888,
-      completer.complete,
-    );
-    return completer.future;
-  }
 }

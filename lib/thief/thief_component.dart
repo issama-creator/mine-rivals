@@ -53,13 +53,16 @@ class ThiefComponent extends SpriteAnimationComponent {
 
   @override
   Future<void> onLoad() async {
-    await AssetLibrary.ensureLoaded();
+    if (!AssetLibrary.ready) {
+      await AssetLibrary.ensureLoaded(prefetchRest: false);
+    }
     if (kind == ThiefKind.blue) {
-      await AssetLibrary.ensureThiefBlueLoaded();
+      await AssetLibrary.ensureThiefBlueLoadedSafe();
     }
     animation = switch (kind) {
       ThiefKind.primary => AssetLibrary.thiefRun,
-      ThiefKind.blue => AssetLibrary.thiefRunBlue,
+      ThiefKind.blue =>
+          AssetLibrary.thiefRunBlue ?? AssetLibrary.thiefRun,
     };
     playing = true;
     passSide = switch (kind) {
@@ -118,14 +121,14 @@ class ThiefComponent extends SpriteAnimationComponent {
     } else {
       _displayScale += (target - _displayScale) * (1 - (1 / (1 + 5.5 * dt)));
     }
-    size = Vector2(
+    size.setValues(
       GameConfig.thiefWidth * _displayScale,
       GameConfig.thiefHeight * _displayScale,
     );
     // Shadow is created in onLoad — skip until mounted (blue thief join).
     final shadow = _shadow;
     if (shadow == null) return;
-    shadow.size = Vector2(size.x * 0.78, size.y * 0.11);
-    shadow.position = Vector2(size.x * 0.5, size.y - 2);
+    shadow.size.setValues(size.x * 0.78, size.y * 0.11);
+    shadow.position.setValues(size.x * 0.5, size.y - 2);
   }
 }

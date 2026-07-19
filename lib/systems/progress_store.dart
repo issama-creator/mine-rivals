@@ -23,11 +23,16 @@ class ProgressStore {
   static const _kControlSensitivity = 'control_sensitivity';
   static const _kTutorialSeen = 'tutorial_seen';
   static const _kBestDistance = 'best_distance_m';
+  static const _kBestDistanceStandard = 'best_distance_standard_m';
+  static const _kBestDistanceLong = 'best_distance_long_m';
   static const _kBestRares = 'best_rares';
   static const _kWeekKey = 'weekly_key';
   static const _kWeekProgress = 'weekly_progress';
   static const _kWeekDone = 'weekly_done';
   static const _kTotalWins = 'total_wins';
+  static const _kMinerXp = 'miner_xp';
+  static const _kWeekBestDist = 'week_best_distance_m';
+  static const _kTotalRuns = 'total_runs';
 
   SharedPreferences? _prefs;
 
@@ -58,12 +63,18 @@ class ProgressStore {
   final Set<String> dailyDoneIds = {};
   final Map<String, int> dailyProgress = {};
   bool tutorialSeen = false;
+  /// Best of either mode — career unlocks / menu strip.
   int bestDistanceMeters = 0;
+  int bestDistanceStandard = 0;
+  int bestDistanceLong = 0;
   int bestRares = 0;
   int totalWins = 0;
+  int totalRuns = 0;
+  int minerXp = 0;
   String weeklyKey = '';
   int weeklyProgress = 0;
   bool weeklyDone = false;
+  int weekBestDistanceMeters = 0;
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
@@ -75,8 +86,23 @@ class ProgressStore {
         _loadControlSensitivity(p);
     tutorialSeen = p.getBool(_kTutorialSeen) ?? false;
     bestDistanceMeters = p.getInt(_kBestDistance) ?? 0;
+    bestDistanceStandard =
+        p.getInt(_kBestDistanceStandard) ?? bestDistanceMeters;
+    bestDistanceLong = p.getInt(_kBestDistanceLong) ?? 0;
+    // Migrate legacy single best into standard if mode bests empty.
+    if (bestDistanceStandard <= 0 && bestDistanceMeters > 0) {
+      bestDistanceStandard = bestDistanceMeters;
+    }
+    if (bestDistanceStandard > bestDistanceMeters) {
+      bestDistanceMeters = bestDistanceStandard;
+    }
+    if (bestDistanceLong > bestDistanceMeters) {
+      bestDistanceMeters = bestDistanceLong;
+    }
     bestRares = p.getInt(_kBestRares) ?? 0;
     totalWins = p.getInt(_kTotalWins) ?? 0;
+    totalRuns = p.getInt(_kTotalRuns) ?? 0;
+    minerXp = p.getInt(_kMinerXp) ?? 0;
 
     unlockedSkins
       ..clear()
@@ -133,9 +159,11 @@ class ProgressStore {
     if (saved == weeklyKey) {
       weeklyProgress = p.getInt(_kWeekProgress) ?? 0;
       weeklyDone = p.getBool(_kWeekDone) ?? false;
+      weekBestDistanceMeters = p.getInt(_kWeekBestDist) ?? 0;
     } else {
       weeklyProgress = 0;
       weeklyDone = false;
+      weekBestDistanceMeters = 0;
     }
   }
 
@@ -145,6 +173,127 @@ class ProgressStore {
     await p.setString(_kWeekKey, weeklyKey);
     await p.setInt(_kWeekProgress, weeklyProgress);
     await p.setBool(_kWeekDone, weeklyDone);
+    await p.setInt(_kWeekBestDist, weekBestDistanceMeters);
+  }
+
+  /// Sat/Sun — ×2 crystals while leading (freshness event, no server).
+  static bool get weekendEventActive {
+    final wd = DateTime.now().weekday;
+    return wd == DateTime.saturday || wd == DateTime.sunday;
+  }
+
+  static int get weekendLeadRareMult => weekendEventActive ? 2 : 1;
+
+  /// Days left in the Mon–Sun week (1 = last day).
+  static int daysLeftInWeek() {
+    final left = 8 - DateTime.now().weekday;
+    return left.clamp(1, 7);
+  }
+
+  /// Miner level from XP — soft endless progression.
+  int get minerLevel {
+    var lvl = 1;
+    var need = 40;
+    var xp = minerXp;
+    while (xp >= need && lvl < 50) {
+      xp -= need;
+      lvl++;
+      need = 40 + (lvl - 1) * 18;
+    }
+    return lvl;
+  }
+
+  int get minerXpIntoLevel {
+    var need = 40;
+    var xp = minerXp;
+    var lvl = 1;
+    while (xp >= need && lvl < 50) {
+      xp -= need;
+      lvl++;
+      need = 40 + (lvl - 1) * 18;
+    }
+    return xp;
+  }
+
+  int get minerXpForNextLevel {
+    final lvl = minerLevel;
+    return 40 + (lvl - 1) * 18;
+  }
+
+  String get minerTitle {
+    final l = minerLevel;
+    if (l >= 40) return 'Легенда шахты';
+    if (l >= 30) return 'Мастер гонки';
+    if (l >= 20) return 'Охотник за вором';
+    if (l >= 12) return 'Бывалый шахтёр';
+    if (l >= 6) return 'Подмастерье';
+    return 'Новичок';
+  }
+
+  /// Next streak skin FOMO — “2 дн. → Ниндзя”.
+  ({int daysLeft, int atStreak, String skinName})? nextStreakUnlock() {
+    for (final e in streakUnlocks.entries) {
+      if (!unlockedSkins.contains(e.value)) {
+        final left = (e.key - missionStreak).clamp(0, 99);
+        return (
+          daysLeft: left,
+          atStreak: e.key,
+          skinName: PlayerSkins.byId(e.value).nameRu,
+        );
+      }
+    }
+    return null;
+  }
+
+  /// Closest incomplete daily — “ещё 1 обгон до миссии”.
+  String? nextDailyHook() {
+    for (final m in DailyMissions.forToday()) {
+      if (isDone(m.id)) continue;
+      final left = (m.target - progressOf(m.id)).clamp(1, m.target);
+      switch (m.kind) {
+        case DailyKind.overtakeThief:
+          return left == 1
+              ? 'Ещё 1 обгон до миссии'
+              : 'Ещё $left обгона до миссии';
+        case DailyKind.raresWhileLeading:
+          return 'Ещё $left крист. впереди до миссии';
+        case DailyKind.runMeters:
+          return 'Ещё $left м до миссии';
+        case DailyKind.collectRares:
+          return 'Ещё $left крист. до миссии';
+        case DailyKind.winRun:
+          return left == 1
+              ? 'Выиграй ещё 1 забег'
+              : 'Выиграй ещё $left забега';
+        case DailyKind.collectGold:
+          return 'Ещё $left монет до миссии';
+      }
+    }
+    return null;
+  }
+
+  /// Primary comeback line for results / menu.
+  String comebackHook() {
+    final daily = nextDailyHook();
+    if (daily != null) return daily;
+    if (!weeklyDone) {
+      final week = WeeklyMissions.forThisWeek();
+      final left = (week.target - weeklyProgress).clamp(1, week.target);
+      final days = daysLeftInWeek();
+      return 'Неделя: ещё $left · осталось $days дн.';
+    }
+    final streak = nextStreakUnlock();
+    if (streak != null) {
+      if (streak.daysLeft <= 0) {
+        return 'Закрой миссии сегодня → ${streak.skinName}';
+      }
+      return '${streak.daysLeft} дн. серии → ${streak.skinName}';
+    }
+    final career = nextCareerUnlock();
+    if (career != null) {
+      return 'Рекорд ${career.meters} м → ${career.skinName}';
+    }
+    return 'Новый рекорд — брось вызов себе';
   }
 
   bool isSkinUnlocked(String id) => unlockedSkins.contains(id);
@@ -181,7 +330,7 @@ class ProgressStore {
       case 'smooth':
         return 0.0;
       default:
-        return 0.35;
+        return 0.42;
     }
   }
 
@@ -259,12 +408,29 @@ class ProgressStore {
       weeklyKey = weekKey();
       weeklyProgress = 0;
       weeklyDone = false;
+      weekBestDistanceMeters = 0;
     }
+
+    totalRuns += 1;
+    await _prefs?.setInt(_kTotalRuns, totalRuns);
 
     if (won) {
       totalWins += 1;
       await _prefs?.setInt(_kTotalWins, totalWins);
     }
+
+    final distM = distance.round();
+    if (distM > weekBestDistanceMeters) {
+      weekBestDistanceMeters = distM;
+    }
+
+    final xpGain = (distM ~/ 50) +
+        rares * 3 +
+        overtakes * 2 +
+        (won ? 15 : 0) +
+        (raresWhileLeading > 0 ? 4 : 0);
+    minerXp += xpGain;
+    await _prefs?.setInt(_kMinerXp, minerXp);
 
     final newly = <String>[];
     for (final m in missions) {
@@ -307,8 +473,8 @@ class ProgressStore {
         weeklyJust = true;
         newly.add('Неделя: ${week.titleRu}');
       }
-      await _saveWeekly();
     }
+    await _saveWeekly();
 
     final skins = <String>[];
     if (_allMissionsDone(missions)) {
@@ -352,14 +518,32 @@ class ProgressStore {
     return out;
   }
 
+  int bestDistanceFor(RunMode mode) => switch (mode) {
+        RunMode.standard => bestDistanceStandard,
+        RunMode.long => bestDistanceLong,
+      };
+
   /// Persist personal bests. Returns which records were broken this run.
   /// Memory fields update synchronously so UI can read them before await.
   Future<({bool distance, bool rares, List<String> skins})> considerRecords({
     required int distanceMeters,
     required int rares,
+    RunMode? mode,
   }) async {
+    final runMode = mode ?? GameSettings.instance.runMode;
     var beatDistance = false;
     var beatRares = false;
+
+    if (runMode == RunMode.standard &&
+        distanceMeters > bestDistanceStandard) {
+      bestDistanceStandard = distanceMeters;
+      beatDistance = true;
+    } else if (runMode == RunMode.long &&
+        distanceMeters > bestDistanceLong) {
+      bestDistanceLong = distanceMeters;
+      beatDistance = true;
+    }
+
     if (distanceMeters > bestDistanceMeters) {
       bestDistanceMeters = distanceMeters;
       beatDistance = true;
@@ -372,6 +556,8 @@ class ProgressStore {
       final p = _prefs;
       if (p != null) {
         await p.setInt(_kBestDistance, bestDistanceMeters);
+        await p.setInt(_kBestDistanceStandard, bestDistanceStandard);
+        await p.setInt(_kBestDistanceLong, bestDistanceLong);
         await p.setInt(_kBestRares, bestRares);
       }
     }
@@ -549,60 +735,31 @@ class DailyMissions {
     final meterTargets = [1200, 1500, 1800, 2000];
     final overtakeTargets = [2, 3, 3, 4];
     final leadRareTargets = [3, 4, 5, 6];
-    final rareTargets = [6, 8, 10, 12];
-    final winTargets = [1, 1, 2, 2];
     final meters = meterTargets[seed % meterTargets.length];
     final overtakes = overtakeTargets[(seed ~/ 7) % overtakeTargets.length];
     final leadRares =
         leadRareTargets[(seed ~/ 13) % leadRareTargets.length];
-    // Rotating 4th mission — dopamine on rivalry / jewels / finish.
-    final bonusRoll = (seed ~/ 19) % 3;
-    final DailyMissionDef bonus;
-    if (bonusRoll == 0) {
-      final wins = winTargets[(seed ~/ 23) % winTargets.length];
-      bonus = DailyMissionDef(
-        id: 'wins',
-        kind: DailyKind.winRun,
-        target: wins,
-        titleRu: wins == 1 ? 'Выиграй забег у вора' : 'Выиграй $wins забега',
-      );
-    } else if (bonusRoll == 1) {
-      final rares = rareTargets[(seed ~/ 29) % rareTargets.length];
-      bonus = DailyMissionDef(
-        id: 'rares',
-        kind: DailyKind.collectRares,
-        target: rares,
-        titleRu: 'Собери $rares кристаллов',
-      );
-    } else {
-      bonus = DailyMissionDef(
-        id: 'wins',
-        kind: DailyKind.winRun,
-        target: 1,
-        titleRu: 'Финишируй впереди вора',
-      );
-    }
 
+    // Three short goals — Subway-style, no puzzle wording.
     return [
       DailyMissionDef(
         id: 'overtakes',
         kind: DailyKind.overtakeThief,
         target: overtakes,
-        titleRu: 'Обогнать вора $overtakes раз',
+        titleRu: 'Обгони вора',
       ),
       DailyMissionDef(
         id: 'lead_rares',
         kind: DailyKind.raresWhileLeading,
         target: leadRares,
-        titleRu: 'Кристаллы, пока ты впереди: $leadRares',
+        titleRu: 'Кристаллы впереди',
       ),
       DailyMissionDef(
         id: 'run',
         kind: DailyKind.runMeters,
         target: meters,
-        titleRu: 'Пробеги $meters м',
+        titleRu: 'Пробеги метры',
       ),
-      bonus,
     ];
   }
 
@@ -635,7 +792,7 @@ class WeeklyMissions {
           id: 'w_overtakes',
           kind: DailyKind.overtakeThief,
           target: n,
-          titleRu: 'Обгони вора $n раз за неделю',
+          titleRu: 'Обгони вора',
         );
       case 1:
         final n = [12, 15, 18, 20][(seed ~/ 7) % 4];
@@ -643,7 +800,7 @@ class WeeklyMissions {
           id: 'w_lead',
           kind: DailyKind.raresWhileLeading,
           target: n,
-          titleRu: 'Кристаллы впереди: $n за неделю',
+          titleRu: 'Кристаллы впереди',
         );
       case 2:
         final n = [3, 4, 5, 5][(seed ~/ 11) % 4];
@@ -651,7 +808,7 @@ class WeeklyMissions {
           id: 'w_wins',
           kind: DailyKind.winRun,
           target: n,
-          titleRu: 'Выиграй $n забегов на этой неделе',
+          titleRu: 'Выиграй забеги',
         );
       default:
         final n = [25, 30, 35, 40][(seed ~/ 13) % 4];
@@ -659,7 +816,7 @@ class WeeklyMissions {
           id: 'w_rares',
           kind: DailyKind.collectRares,
           target: n,
-          titleRu: 'Собери $n кристаллов за неделю',
+          titleRu: 'Собери кристаллы',
         );
     }
   }

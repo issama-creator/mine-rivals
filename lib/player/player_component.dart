@@ -1,4 +1,3 @@
-import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 
 import '../effects/ground_shadow.dart';
@@ -7,13 +6,12 @@ import '../game/game_config.dart';
 
 class PlayerComponent extends SpriteAnimationComponent {
   PlayerComponent()
-      : super(
+    : super(
           size: Vector2(GameConfig.playerWidth, GameConfig.playerHeight),
           anchor: Anchor.bottomCenter,
           priority: 20,
         );
 
-  late RectangleHitbox basketHitbox;
   late GroundShadow _shadow;
   double targetX = 0;
   double _displayScale = 1;
@@ -21,9 +19,17 @@ class PlayerComponent extends SpriteAnimationComponent {
   /// Lateral velocity — makes left/right feel smooth and responsive.
   double _steerVx = 0;
 
+  /// Cached basket point — refreshed once per catch tick (no alloc).
+  final Vector2 basketCenter = Vector2.zero();
+
+  /// Approx basket in world space (lean ignored — tiny for catch gates).
+  void refreshBasketCenter() {
+    basketCenter.setValues(position.x, position.y - size.y * 0.88);
+  }
+
   Vector2 get basketWorldCenter {
-    final local = Vector2(size.x * 0.5, size.y * 0.12);
-    return absolutePositionOf(local);
+    refreshBasketCenter();
+    return basketCenter;
   }
 
   void setRunAnimRate(double rate) {
@@ -44,7 +50,9 @@ class PlayerComponent extends SpriteAnimationComponent {
 
   @override
   Future<void> onLoad() async {
-    await AssetLibrary.ensureLoaded();
+    if (!AssetLibrary.ready) {
+      await AssetLibrary.ensureLoaded(prefetchRest: false);
+    }
     animation = AssetLibrary.minerRunForSelected();
     playing = true;
 
@@ -52,15 +60,7 @@ class PlayerComponent extends SpriteAnimationComponent {
     _shadow.size = Vector2(size.x * 0.78, size.y * 0.11);
     _shadow.position = Vector2(size.x * 0.5, size.y - 2);
     await add(_shadow);
-
-    basketHitbox = RectangleHitbox(
-      size: Vector2(GameConfig.basketWidth * 1.35, GameConfig.basketHeight * 2.2),
-      position: Vector2(
-        (size.x - GameConfig.basketWidth * 1.35) / 2,
-        0,
-      ),
-    )..collisionType = CollisionType.active;
-    add(basketHitbox);
+    // Catch is distance-driven in MineRivalsGame — no Flame hitboxes.
   }
 
   /// Smooth velocity follow toward finger X — pleasant arc, still dodge-ready.
@@ -123,15 +123,11 @@ class PlayerComponent extends SpriteAnimationComponent {
     } else {
       _displayScale += (scale - _displayScale) * (1 - (1 / (1 + 10 * dt)));
     }
-    size = Vector2(
+    size.setValues(
       GameConfig.playerWidth * _displayScale,
       GameConfig.playerHeight * _displayScale,
     );
-    _shadow.size = Vector2(size.x * 0.78, size.y * 0.11);
-    _shadow.position = Vector2(size.x * 0.5, size.y - 2);
-    final bw = GameConfig.basketWidth * 1.35 * _displayScale;
-    final bh = GameConfig.basketHeight * 2.2 * _displayScale;
-    basketHitbox.size = Vector2(bw, bh);
-    basketHitbox.position = Vector2((size.x - bw) / 2, 0);
+    _shadow.size.setValues(size.x * 0.78, size.y * 0.11);
+    _shadow.position.setValues(size.x * 0.5, size.y - 2);
   }
 }

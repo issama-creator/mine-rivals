@@ -20,7 +20,8 @@ class DustPuff extends PositionComponent {
       final a = _rng.nextDouble() * pi * 2;
       final s = 30 + _rng.nextDouble() * 55;
       return _Particle(
-        velocity: Vector2(cos(a), sin(a)) * s,
+        vx: cos(a) * s,
+        vy: sin(a) * s,
         radius: 2 + _rng.nextDouble() * 3,
       );
     });
@@ -37,8 +38,9 @@ class DustPuff extends PositionComponent {
     super.update(dt);
     _life -= dt;
     for (final p in _particles) {
-      p.offset += p.velocity * dt;
-      p.velocity.y += 40 * dt;
+      p.ox += p.vx * dt;
+      p.oy += p.vy * dt;
+      p.vy += 40 * dt;
     }
     if (_life <= 0) removeFromParent();
   }
@@ -48,7 +50,7 @@ class DustPuff extends PositionComponent {
     final t = (_life / 0.35).clamp(0.0, 1.0);
     _paint.color = Colors.brown.withValues(alpha: 0.28 * t);
     for (final p in _particles) {
-      canvas.drawCircle(Offset(p.offset.x, p.offset.y), p.radius * t, _paint);
+      canvas.drawCircle(Offset(p.ox, p.oy), p.radius * t, _paint);
     }
   }
 }
@@ -74,7 +76,8 @@ class ParticleBurst extends PositionComponent {
       final a = _rng.nextDouble() * pi * 2;
       final s = 50 + _rng.nextDouble() * 110;
       return _Particle(
-        velocity: Vector2(cos(a), sin(a)) * s,
+        vx: cos(a) * s,
+        vy: sin(a) * s,
         radius: 2 + _rng.nextDouble() * 3,
       );
     });
@@ -85,8 +88,10 @@ class ParticleBurst extends PositionComponent {
     super.update(dt);
     _life -= dt;
     for (final p in _particles) {
-      p.offset += p.velocity * dt;
-      p.velocity *= 0.96;
+      p.ox += p.vx * dt;
+      p.oy += p.vy * dt;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
     }
     if (_life <= 0) removeFromParent();
   }
@@ -96,7 +101,7 @@ class ParticleBurst extends PositionComponent {
     final t = (_life / 0.4).clamp(0.0, 1.0);
     _paint.color = color.withValues(alpha: 0.4 * t);
     for (final p in _particles) {
-      canvas.drawCircle(Offset(p.offset.x, p.offset.y), p.radius * 0.85, _paint);
+      canvas.drawCircle(Offset(p.ox, p.oy), p.radius * 0.85, _paint);
     }
   }
 }
@@ -127,8 +132,10 @@ class BasketSpark extends PositionComponent {
 }
 
 class _Particle {
-  _Particle({required this.velocity, required this.radius});
-  Vector2 offset = Vector2.zero();
-  Vector2 velocity;
+  _Particle({required this.vx, required this.vy, required this.radius});
+  double ox = 0;
+  double oy = 0;
+  double vx;
+  double vy;
   double radius;
 }

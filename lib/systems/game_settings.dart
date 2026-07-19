@@ -7,26 +7,29 @@ class GameSettings {
   bool shakeEnabled = true;
 
   /// Lane steer sensitivity — 0 = плавно, 1 = резко.
-  double controlSensitivity = 0.35;
+  /// Slightly snappier default for “finger feels good” polish.
+  double controlSensitivity = 0.42;
 
   /// Selected miner skin id — see [PlayerSkins].
   String selectedSkinId = 'player';
 
-  /// Standard = 5×700 m, Long = 10×700 m.
+  /// Endless rivalry — mode picks thief count / pressure, not run length.
   RunMode runMode = RunMode.standard;
 }
 
 enum RunMode {
-  standard(corridors: 5, titleRu: 'Стандарт', subtitleRu: '5 шахт · 3500 м'),
-  long(corridors: 10, titleRu: 'Долгий', subtitleRu: '10 шахт · 7000 м');
+  standard(thiefCount: 1, titleRu: 'Стандарт', blurbRu: '1 вор'),
+  long(thiefCount: 2, titleRu: 'Долгий', blurbRu: '2 вора');
 
   const RunMode({
-    required this.corridors,
+    required this.thiefCount,
     required this.titleRu,
-    required this.subtitleRu,
+    required this.blurbRu,
   });
 
-  final int corridors;
+  final int thiefCount;
   final String titleRu;
-  final String subtitleRu;
+  final String blurbRu;
+
+  bool get isLong => this == RunMode.long;
 }

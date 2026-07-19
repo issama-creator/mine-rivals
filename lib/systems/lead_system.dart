@@ -64,8 +64,13 @@ class LeadSystem {
   }
 
   void update(double dt, {required bool playingClean}) {
-    if (playingClean && leadDistance < GameConfig.startLeadDistance) {
-      applyDelta(GameConfig.leadRecoverPerSec * dt);
+    if (playingClean) {
+      if (leadDistance < 0) {
+        // Thief ahead — clean play slowly reels him back (coins help too).
+        applyDelta(GameConfig.catchUpRecoverPerSec * dt);
+      } else if (leadDistance < GameConfig.startLeadDistance) {
+        applyDelta(GameConfig.leadRecoverPerSec * dt);
+      }
     }
 
     // Always ease visual lead — also during overtake so exit doesn't snap.
@@ -131,10 +136,24 @@ class LeadSystem {
         thiefY: lerpDouble(closeY, farY, t)!,
       );
     }
-    final t = (-lead / -GameConfig.minLeadDistance).clamp(0.0, 1.0);
+    // Map meters ahead → screen: close on path → far → off-top by ~40 m.
+    // Deeper gaps (up to 200 m) stay off-screen; HUD shows the number.
+    final gap = (-lead).clamp(0.0, -GameConfig.minLeadDistance);
+    final offAt = -GameConfig.thiefOffScreenLead; // positive meters
+    final onScreen = aheadY;
+    final offTop = -screenHeight * 0.12;
+    late final double thiefY;
+    if (gap <= 8) {
+      thiefY = lerpDouble(runnerY - 20, onScreen, (gap / 8).clamp(0.0, 1.0))!;
+    } else if (gap <= offAt) {
+      final u = ((gap - 8) / (offAt - 8)).clamp(0.0, 1.0);
+      thiefY = lerpDouble(onScreen, offTop, u)!;
+    } else {
+      thiefY = offTop;
+    }
     return (
       playerY: runnerY,
-      thiefY: lerpDouble(runnerY - 20, aheadY, t)!,
+      thiefY: thiefY,
     );
   }
 

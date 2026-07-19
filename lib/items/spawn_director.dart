@@ -51,10 +51,20 @@ class SpawnDirector {
   int _patternCooldown = 0;
   double _magnetCooldown = 18;
   double _pitCooldown = 8;
+  double _spikesCooldown = 5;
   double _webPitCooldown = 16;
+  double _bombSpikesCooldown = 14;
+  double _webSpikesCooldown = 18;
+  double _spikesPitCooldown = 20;
+  double _zigzagCooldown = 16;
+  double _gateWebPitCooldown = 18;
+  double _bombWebSpikesCooldown = 16;
+  double _splitFloorCooldown = 20;
+  double _bombSandwichCooldown = 18;
+  double _stickyZigzagCooldown = 20;
+  double _fakeSafeDoubleCooldown = 22;
   double _heartCooldown = 20;
   double _potionCooldown = 28;
-  bool _heartSpawned = false;
   bool _potionSpawned = false;
   /// Lane the last coin trail trained the player into (for bait bombs).
   int _lastBaitLane = 1;
@@ -64,21 +74,109 @@ class SpawnDirector {
     _patternCooldown = 0;
     _magnetCooldown = 14 + _rng.nextDouble() * 10;
     _pitCooldown = 6 + _rng.nextDouble() * 6;
+    _spikesCooldown = 3 + _rng.nextDouble() * 4;
     _webPitCooldown = 12 + _rng.nextDouble() * 10;
-    _heartCooldown = 18 + _rng.nextDouble() * 10;
+    _bombSpikesCooldown = 10 + _rng.nextDouble() * 8;
+    _webSpikesCooldown = 14 + _rng.nextDouble() * 8;
+    _spikesPitCooldown = 16 + _rng.nextDouble() * 8;
+    _zigzagCooldown = 12 + _rng.nextDouble() * 8;
+    _gateWebPitCooldown = 14 + _rng.nextDouble() * 8;
+    _bombWebSpikesCooldown = 12 + _rng.nextDouble() * 8;
+    _splitFloorCooldown = 16 + _rng.nextDouble() * 8;
+    _bombSandwichCooldown = 14 + _rng.nextDouble() * 8;
+    _stickyZigzagCooldown = 16 + _rng.nextDouble() * 8;
+    _fakeSafeDoubleCooldown = 18 + _rng.nextDouble() * 8;
+    _heartCooldown = 14 + _rng.nextDouble() * 8;
     _potionCooldown = 26 + _rng.nextDouble() * 12;
-    _heartSpawned = false;
     _potionSpawned = false;
     _lastBaitLane = 1;
-    _enqueueBreathing();
+    // Scripted first ~20–25s — teach steer → crystal → dodge → reward.
+    _enqueueOpeningHook();
   }
 
-  void update(double dt, {double progress = 0}) {
+  /// 0 at start → +1 every 200 m. Gates “mastery” combos gradually.
+  int get _trapTier =>
+      (_runDistance / GameConfig.trapComboTierMeters).floor();
+
+  /// Coins → jewel → telegraphed bomb → reward jewel. Then normal director.
+  void _enqueueOpeningHook() {
+    const lane = 1;
+    _lastBaitLane = lane;
+    for (var i = 0; i < 5; i++) {
+      _queue.add(
+        SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.22),
+      );
+    }
+    _queue.add(
+      SpawnBeat(type: ItemType.diamond, lane: lane, fixedGap: 0.38),
+    );
+    // Empty beat — “something’s coming”.
+    _queue.add(
+      const SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.55,
+      ),
+    );
+    // Single bomb on a side lane — middle stay clear (where coins trained).
+    _queue.add(
+      const SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        bombLane: 0,
+        forceDual: false,
+        fixedGap: 0.28,
+      ),
+    );
+    _queue.add(
+      SpawnBeat(type: ItemType.emerald, lane: lane, fixedGap: 0.42),
+    );
+    // Teach spikes early (after chase intro) — guaranteed, separate from pits.
+    _queue.add(
+      const SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.55,
+      ),
+    );
+    _queue.add(
+      const SpawnBeat(type: ItemType.spikes, lane: 2, fixedGap: 0.4),
+    );
+    _queue.add(
+      SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.35),
+    );
+    _spikesCooldown = 8;
+    _patternCooldown = 1;
+  }
+
+  double _runDistance = 0;
+
+  void update(double dt, {double progress = 0, double distance = 0}) {
+    _runDistance = distance;
     _magnetCooldown = max(0, _magnetCooldown - dt);
     _pitCooldown = max(0, _pitCooldown - dt);
+    _spikesCooldown = max(0, _spikesCooldown - dt);
     _webPitCooldown = max(0, _webPitCooldown - dt);
+    _bombSpikesCooldown = max(0, _bombSpikesCooldown - dt);
+    _webSpikesCooldown = max(0, _webSpikesCooldown - dt);
+    _spikesPitCooldown = max(0, _spikesPitCooldown - dt);
+    _zigzagCooldown = max(0, _zigzagCooldown - dt);
+    _gateWebPitCooldown = max(0, _gateWebPitCooldown - dt);
+    _bombWebSpikesCooldown = max(0, _bombWebSpikesCooldown - dt);
+    _splitFloorCooldown = max(0, _splitFloorCooldown - dt);
+    _bombSandwichCooldown = max(0, _bombSandwichCooldown - dt);
+    _stickyZigzagCooldown = max(0, _stickyZigzagCooldown - dt);
+    _fakeSafeDoubleCooldown = max(0, _fakeSafeDoubleCooldown - dt);
     _heartCooldown = max(0, _heartCooldown - dt);
     _potionCooldown = max(0, _potionCooldown - dt);
+  }
+
+  /// Convert run-meters → silence gap (scroll-aware).
+  double _gapSecForMeters(double meters, {double minSec = 0.35, double maxSec = 1.4}) {
+    final pace = GameConfig.runSpeedAt(_runDistance);
+    final rate = GameConfig.distanceMeterRate;
+    if (pace <= 0.01 || rate <= 0.01) return minSec;
+    return (meters / (pace * rate)).clamp(minSec, maxSec);
   }
 
   SpawnBeat nextBeat({required double progress}) {
@@ -119,9 +217,8 @@ class SpawnDirector {
       return;
     }
 
-    // One heart / potion per run — rare Subway-style pickups.
-    if (!_heartSpawned &&
-        _heartCooldown <= 0 &&
+    // Hearts can drop several times (stack to maxHearts on pickup).
+    if (_heartCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.heartSpawnChance) {
       _enqueueHeart();
       return;
@@ -134,11 +231,93 @@ class SpawnDirector {
       return;
     }
 
-    // Rare: two webs to snare, then a pit while sticky (~2–3 m later).
-    if (_webPitCooldown <= 0 &&
+    final tier = _trapTier;
+
+    // Progressive combos — unlock every ~200 m (top-runner set-pieces).
+    // Tier 1 (200m): bomb→spikes, bomb sandwich→pit
+    if (tier >= 1 &&
+        _bombSpikesCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.bombSpikesComboChanceAt(progress)) {
+      _enqueueBombSpikesCombo();
+      return;
+    }
+    if (tier >= 1 &&
+        _bombSandwichCooldown <= 0 &&
+        _pitCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.bombSandwichPitChance) {
+      _enqueueBombSandwichPit();
+      return;
+    }
+
+    // Tier 2 (400m): web→pit, zigzag, gate→web→pit, bomb→web→spikes
+    if (tier >= 2 &&
+        _webPitCooldown <= 0 &&
         _pitCooldown <= 0 &&
         _rng.nextDouble() < GameConfig.webPitComboChanceAt(progress)) {
       _enqueueWebPitCombo(progress);
+      return;
+    }
+    if (tier >= 2 &&
+        _zigzagCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.zigzagBombChance) {
+      _enqueueZigzagBombs();
+      return;
+    }
+    if (tier >= 2 &&
+        _gateWebPitCooldown <= 0 &&
+        _pitCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.gateWebPitChance) {
+      _enqueueGateWebPit();
+      return;
+    }
+    if (tier >= 2 &&
+        _bombWebSpikesCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.bombWebSpikesChance) {
+      _enqueueBombWebSpikes();
+      return;
+    }
+
+    // Tier 3 (600m): web→spikes, sticky zigzag, split floor
+    if (tier >= 3 &&
+        _webSpikesCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.webSpikesComboChance) {
+      _enqueueWebSpikesCombo();
+      return;
+    }
+    if (tier >= 3 &&
+        _stickyZigzagCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.stickyZigzagChance) {
+      _enqueueStickyZigzag();
+      return;
+    }
+    if (tier >= 3 &&
+        _splitFloorCooldown <= 0 &&
+        _pitCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.splitFloorChance) {
+      _enqueueSplitFloor();
+      return;
+    }
+
+    // Tier 4 (800m): spikes→pit, double fake-safe
+    if (tier >= 4 &&
+        _spikesPitCooldown <= 0 &&
+        _pitCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.spikesPitComboChance) {
+      _enqueueSpikesPitCombo();
+      return;
+    }
+    if (tier >= 4 &&
+        _fakeSafeDoubleCooldown <= 0 &&
+        _pitCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.fakeSafeDoubleChance) {
+      _enqueueFakeSafeDouble();
+      return;
+    }
+
+    // Spikes — own track from early run (never converted from / into pits).
+    if (_spikesCooldown <= 0 &&
+        _rng.nextDouble() < GameConfig.spikesDirectorChance) {
+      _enqueueSpikesTrap();
       return;
     }
 
@@ -177,7 +356,7 @@ class SpawnDirector {
       _fakeSafeThenBomb(); // long hush, then snap bomb
     } else if (roll < 0.91) {
       _bombGateWithSilence();
-    } else if (p >= GameConfig.pitUnlockProgress && roll < 0.95) {
+    } else if (p >= GameConfig.pitUnlockProgress && roll < 0.93) {
       _enqueuePitTrap();
     } else {
       _mixedSweep();
@@ -535,8 +714,9 @@ class SpawnDirector {
     _queue.add(
       SpawnBeat(type: ItemType.heart, lane: lane, gapMult: 1.05),
     );
-    _heartSpawned = true;
-    _heartCooldown = GameConfig.heartRespawnMin;
+    _heartCooldown = GameConfig.heartRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.heartRespawnMax - GameConfig.heartRespawnMin);
     _patternCooldown = 1;
   }
 
@@ -552,7 +732,7 @@ class SpawnDirector {
     _patternCooldown = 1;
   }
 
-  /// Double web snare → black pit ~2–3 m later while the miner is sticky.
+  /// Web snare → black pit a couple meters later while sticky.
   void _enqueueWebPitCombo(double progress) {
     final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
     _lastBaitLane = lane;
@@ -571,7 +751,6 @@ class SpawnDirector {
       }
     }
 
-    // Web #1, then a tight follow-up web (same lane, or neighbor to cover dodge).
     _queue.add(
       SpawnBeat(
         type: ItemType.web,
@@ -579,23 +758,20 @@ class SpawnDirector {
         fixedGap: 0.24,
       ),
     );
-    final side = _rng.nextBool() ? 1 : -1;
-    final lane2 = _rng.nextDouble() < 0.7
-        ? lane
-        : (lane + side).clamp(0, 2);
-    _queue.add(
-      SpawnBeat(
-        type: ItemType.web,
-        lane: lane2,
-        fixedGap: 0.26 + _rng.nextDouble() * 0.06,
-      ),
-    );
+    // Sometimes a second web covers the dodge lane.
+    if (_rng.nextDouble() < 0.45) {
+      final lane2 = (lane + (_rng.nextBool() ? 1 : -1)).clamp(0, 2);
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.web,
+          lane: lane2,
+          fixedGap: 0.22 + _rng.nextDouble() * 0.06,
+        ),
+      );
+    }
 
-    // ~2–3 run meters of empty shaft, then pit on the snare lane.
-    final meters = 2.0 + _rng.nextDouble();
-    final pace = GameConfig.runSpeedAt(progress.clamp(0.0, 1.0));
-    final gapSec = (meters / (pace * GameConfig.distanceMeterRate))
-        .clamp(0.28, 0.62);
+    // ~2.5–3.5 m empty, then pit on the snare lane.
+    final gapSec = _gapSecForMeters(2.6 + _rng.nextDouble(), minSec: 0.32, maxSec: 0.85);
     _queue.add(
       SpawnBeat(
         type: ItemType.gold,
@@ -604,7 +780,6 @@ class SpawnDirector {
       ),
     );
     _queue.add(SpawnBeat(type: ItemType.pit, lane: lane, gapMult: 1.0));
-    // Crystal just past the pit lane — reward for not falling in.
     _maybeJewelAfterHazard(
       lane: (lane + 1 + _rng.nextInt(2)) % 3,
       chance: 0.48,
@@ -618,6 +793,354 @@ class SpawnDirector {
         _rng.nextDouble() *
             (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
     _patternCooldown = 2;
+  }
+
+  /// Finger-weave: bombs zig across lanes (mastery dodge).
+  void _enqueueZigzagBombs() {
+    var lane = _rng.nextInt(3);
+    _lastBaitLane = lane;
+    _queue.add(
+      const SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.18,
+      ),
+    );
+    final steps = 4 + _rng.nextInt(2);
+    for (var i = 0; i < steps; i++) {
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.bomb,
+          bombPattern: true,
+          forceDual: false,
+          bombLane: lane,
+          fixedGap: 0.34 + _rng.nextDouble() * 0.08,
+        ),
+      );
+      // Step to a neighbor lane — weave left/right.
+      final dir = _rng.nextBool() ? 1 : -1;
+      lane = (lane + dir).clamp(0, 2);
+      if (lane == _lastBaitLane && i > 0) {
+        lane = (lane + 1) % 3;
+      }
+      _lastBaitLane = lane;
+    }
+    _maybeJewelAfterHazard(lane: lane, chance: 0.4);
+    _zigzagCooldown = 18 + _rng.nextDouble() * 12;
+    _patternCooldown = 2;
+  }
+
+  /// Web snare → spikes while sticky (lane / neighbor).
+  void _enqueueWebSpikesCombo() {
+    final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    _lastBaitLane = lane;
+    _queue.add(SpawnBeat(type: ItemType.web, lane: lane, fixedGap: 0.22));
+    final gapSec = _gapSecForMeters(2.2 + _rng.nextDouble(), minSec: 0.3, maxSec: 0.7);
+    _queue.add(
+      SpawnBeat(type: ItemType.gold, silence: true, fixedGap: gapSec),
+    );
+    final spikesLane =
+        _rng.nextDouble() < 0.55 ? lane : (lane + 1 + _rng.nextInt(2)) % 3;
+    _queue.add(SpawnBeat(type: ItemType.spikes, lane: spikesLane, gapMult: 1.0));
+    _maybeJewelAfterHazard(
+      lane: (spikesLane + 1 + _rng.nextInt(2)) % 3,
+      chance: 0.42,
+    );
+    _webSpikesCooldown = 20 + _rng.nextDouble() * 12;
+    _patternCooldown = 2;
+  }
+
+  /// Spikes underfoot → pit on the “safe” dodge lane.
+  void _enqueueSpikesPitCombo() {
+    final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    _lastBaitLane = lane;
+    _queue.add(SpawnBeat(type: ItemType.spikes, lane: lane, fixedGap: 0.2));
+    final free = (lane + 1 + _rng.nextInt(2)) % 3;
+    final gapSec = _gapSecForMeters(2.8 + _rng.nextDouble(), minSec: 0.35, maxSec: 0.85);
+    _queue.add(
+      SpawnBeat(type: ItemType.gold, silence: true, fixedGap: gapSec),
+    );
+    _queue.add(SpawnBeat(type: ItemType.pit, lane: free, gapMult: 1.0));
+    _maybeJewelAfterHazard(lane: lane, chance: 0.45);
+    _spikesPitCooldown = 22 + _rng.nextDouble() * 12;
+    _pitCooldown = GameConfig.pitRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
+    _patternCooldown = 2;
+  }
+
+  /// Dual bomb gate → web on the free lane → pit (squeeze the escape).
+  void _enqueueGateWebPit() {
+    final free = _rng.nextInt(3);
+    _lastBaitLane = free;
+    _queue.add(
+      const SpawnBeat(type: ItemType.gold, silence: true, fixedGap: 0.16),
+    );
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        forceDual: true,
+        bombFreeLane: free,
+        fixedGap: 0.28,
+      ),
+    );
+    final gap1 = _gapSecForMeters(1.8, minSec: 0.28, maxSec: 0.55);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: gap1));
+    _queue.add(SpawnBeat(type: ItemType.web, lane: free, fixedGap: 0.22));
+    final gap2 = _gapSecForMeters(2.4, minSec: 0.32, maxSec: 0.75);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: gap2));
+    _queue.add(SpawnBeat(type: ItemType.pit, lane: free, gapMult: 1.0));
+    _maybeJewelAfterHazard(lane: (free + 1) % 3, chance: 0.5);
+    _gateWebPitCooldown = 20 + _rng.nextDouble() * 12;
+    _pitCooldown = GameConfig.pitRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
+    _patternCooldown = 2;
+  }
+
+  /// Single bomb → web on dodge lane → spikes (sticky second hit).
+  void _enqueueBombWebSpikes() {
+    final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    final dodge = (lane + 1 + _rng.nextInt(2)) % 3;
+    _lastBaitLane = lane;
+    for (var i = 0; i < 2; i++) {
+      _queue.add(SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.14));
+    }
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        forceDual: false,
+        bombLane: lane,
+        fixedGap: 0.26,
+      ),
+    );
+    final g1 = _gapSecForMeters(1.6, minSec: 0.26, maxSec: 0.5);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: g1));
+    _queue.add(SpawnBeat(type: ItemType.web, lane: dodge, fixedGap: 0.2));
+    final g2 = _gapSecForMeters(2.2, minSec: 0.3, maxSec: 0.7);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: g2));
+    _queue.add(SpawnBeat(type: ItemType.spikes, lane: dodge, gapMult: 1.0));
+    _maybeJewelAfterHazard(lane: lane, chance: 0.45);
+    _bombWebSpikesCooldown = 18 + _rng.nextDouble() * 12;
+    _spikesCooldown = GameConfig.spikesRespawnMin * 0.6;
+    _patternCooldown = 2;
+  }
+
+  /// Spikes on one lane + pit on another — pick a side, both lethal.
+  void _enqueueSplitFloor() {
+    final a = _rng.nextInt(3);
+    var b = (a + 1 + _rng.nextInt(2)) % 3;
+    if (b == a) b = (a + 1) % 3;
+    _lastBaitLane = a;
+    _queue.add(
+      const SpawnBeat(type: ItemType.gold, silence: true, fixedGap: 0.2),
+    );
+    _queue.add(SpawnBeat(type: ItemType.spikes, lane: a, fixedGap: 0.18));
+    _queue.add(SpawnBeat(type: ItemType.pit, lane: b, gapMult: 0.85));
+    _maybeJewelAfterHazard(lane: 3 - a - b, chance: 0.55);
+    _splitFloorCooldown = 22 + _rng.nextDouble() * 12;
+    _pitCooldown = GameConfig.pitRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
+    _spikesCooldown = GameConfig.spikesRespawnMin;
+    _patternCooldown = 2;
+  }
+
+  /// Bomb left → bomb right → pit middle (runner sandwich).
+  void _enqueueBombSandwichPit() {
+    final mid = 1;
+    final side = _rng.nextBool() ? 0 : 2;
+    final other = side == 0 ? 2 : 0;
+    _lastBaitLane = mid;
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        forceDual: false,
+        bombLane: side,
+        fixedGap: 0.32,
+      ),
+    );
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        forceDual: false,
+        bombLane: other,
+        fixedGap: 0.36,
+      ),
+    );
+    final gap = _gapSecForMeters(2.5, minSec: 0.35, maxSec: 0.8);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: gap));
+    _queue.add(SpawnBeat(type: ItemType.pit, lane: mid, gapMult: 1.0));
+    _maybeJewelAfterHazard(lane: side, chance: 0.42);
+    _bombSandwichCooldown = 20 + _rng.nextDouble() * 12;
+    _pitCooldown = GameConfig.pitRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
+    _patternCooldown = 2;
+  }
+
+  /// Web first → short zigzag bombs while the player is sticky.
+  void _enqueueStickyZigzag() {
+    final lane = _rng.nextInt(3);
+    _lastBaitLane = lane;
+    _queue.add(SpawnBeat(type: ItemType.web, lane: lane, fixedGap: 0.2));
+    final gap = _gapSecForMeters(1.4, minSec: 0.22, maxSec: 0.45);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: gap));
+    var z = (lane + 1) % 3;
+    for (var i = 0; i < 3; i++) {
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.bomb,
+          bombPattern: true,
+          forceDual: false,
+          bombLane: z,
+          fixedGap: 0.30 + _rng.nextDouble() * 0.06,
+        ),
+      );
+      z = (z + (_rng.nextBool() ? 1 : -1)).clamp(0, 2);
+    }
+    _maybeJewelAfterHazard(lane: lane, chance: 0.4);
+    _stickyZigzagCooldown = 22 + _rng.nextDouble() * 12;
+    _zigzagCooldown = max(_zigzagCooldown, 10);
+    _patternCooldown = 2;
+  }
+
+  /// Dual free lane looks safe → pit there → spikes on the bait lane.
+  void _enqueueFakeSafeDouble() {
+    final bait = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    final free = (bait + 1 + _rng.nextInt(2)) % 3;
+    _lastBaitLane = bait;
+    for (var i = 0; i < 2; i++) {
+      _queue.add(SpawnBeat(type: ItemType.gold, lane: bait, fixedGap: 0.14));
+    }
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.bomb,
+        bombPattern: true,
+        forceDual: true,
+        bombFreeLane: free,
+        fixedGap: 0.26,
+      ),
+    );
+    final g1 = _gapSecForMeters(2.2, minSec: 0.32, maxSec: 0.7);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: g1));
+    _queue.add(SpawnBeat(type: ItemType.pit, lane: free, fixedGap: 0.22));
+    final g2 = _gapSecForMeters(2.6, minSec: 0.35, maxSec: 0.8);
+    _queue.add(SpawnBeat(type: ItemType.gold, silence: true, fixedGap: g2));
+    _queue.add(SpawnBeat(type: ItemType.spikes, lane: bait, gapMult: 1.0));
+    _maybeJewelAfterHazard(lane: 3 - bait - free, chance: 0.5);
+    _fakeSafeDoubleCooldown = 24 + _rng.nextDouble() * 14;
+    _pitCooldown = GameConfig.pitRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.pitRespawnMax - GameConfig.pitRespawnMin);
+    _spikesCooldown = GameConfig.spikesRespawnMin;
+    _patternCooldown = 2;
+  }
+
+  /// Bomb (or gate) → ~5 m later spikes on the bait / escape lane.
+  void _enqueueBombSpikesCombo() {
+    final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    _lastBaitLane = lane;
+
+    final n = 1 + _rng.nextInt(3);
+    for (var i = 0; i < n; i++) {
+      _queue.add(
+        SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.15),
+      );
+    }
+    _queue.add(
+      const SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.16,
+      ),
+    );
+
+    late final int spikesLane;
+    if (_rng.nextDouble() < 0.55) {
+      // Dual gate: free lane looks safe → spikes there after ~5 m.
+      final free = (lane + 1 + _rng.nextInt(2)) % 3;
+      spikesLane = free;
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.bomb,
+          bombPattern: true,
+          forceDual: true,
+          bombFreeLane: free,
+        ),
+      );
+    } else {
+      // Single bomb on bait lane → spikes same lane (or neighbor).
+      spikesLane = _rng.nextDouble() < 0.65
+          ? lane
+          : (lane + 1 + _rng.nextInt(2)) % 3;
+      _queue.add(
+        SpawnBeat(
+          type: ItemType.bomb,
+          bombPattern: true,
+          forceDual: false,
+          bombLane: lane,
+        ),
+      );
+    }
+
+    final gapSec = _gapSecForMeters(
+      GameConfig.bombSpikesGapMeters + (_rng.nextDouble() * 0.6 - 0.2),
+      minSec: 0.55,
+      maxSec: 1.35,
+    );
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: gapSec,
+      ),
+    );
+    _queue.add(SpawnBeat(type: ItemType.spikes, lane: spikesLane, gapMult: 1.0));
+    _maybeJewelAfterHazard(
+      lane: (spikesLane + 1 + _rng.nextInt(2)) % 3,
+      chance: 0.45,
+    );
+
+    _bombSpikesCooldown = GameConfig.bombSpikesComboCooldownMin +
+        _rng.nextDouble() *
+            (GameConfig.bombSpikesComboCooldownMax -
+                GameConfig.bombSpikesComboCooldownMin);
+    _patternCooldown = 2;
+  }
+
+  /// Coin trail → spikes on a lane (separate from pit traps).
+  void _enqueueSpikesTrap() {
+    final lane = _rng.nextBool() ? _lastBaitLane.clamp(0, 2) : _rng.nextInt(3);
+    _lastBaitLane = lane;
+    final n = 2 + _rng.nextInt(2);
+    for (var i = 0; i < n; i++) {
+      _queue.add(
+        SpawnBeat(type: ItemType.gold, lane: lane, fixedGap: 0.16),
+      );
+    }
+    _queue.add(
+      SpawnBeat(
+        type: ItemType.gold,
+        silence: true,
+        fixedGap: 0.16 + _rng.nextDouble() * 0.1,
+      ),
+    );
+    final spikesLane =
+        _rng.nextDouble() < 0.55 ? lane : (lane + 1 + _rng.nextInt(2)) % 3;
+    _queue.add(SpawnBeat(type: ItemType.spikes, lane: spikesLane, gapMult: 1.0));
+    _maybeJewelAfterHazard(
+      lane: (spikesLane + 1 + _rng.nextInt(2)) % 3,
+      chance: 0.45,
+    );
+    _spikesCooldown = GameConfig.spikesRespawnMin +
+        _rng.nextDouble() *
+            (GameConfig.spikesRespawnMax - GameConfig.spikesRespawnMin);
+    _patternCooldown = 1;
   }
 
   /// Coins bait into a lane, then a black pit (sometimes after a bomb dodge).

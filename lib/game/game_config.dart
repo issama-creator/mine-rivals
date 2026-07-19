@@ -1,18 +1,17 @@
+import 'dart:math' as math;
+
 import '../systems/game_settings.dart';
 
 /// Tunable balance + world constants for Mine Rivals.
 class GameConfig {
-  /// Length of one shaft; theme swaps every segment.
-  static const double corridorSegmentMeters = 700;
+  /// Theme / shaft art swaps every kilometer (endless).
+  static const double corridorSegmentMeters = 1000;
 
-  /// How many corridor PNGs ship in assets (always load all).
+  /// How many corridor PNGs ship in assets (cycle forever).
   static const int corridorAssetCount = 10;
 
-  /// Active run length — from [GameSettings.runMode].
-  static int get corridorCount => GameSettings.instance.runMode.corridors;
-
-  static double get levelLengthMeters =>
-      corridorSegmentMeters * corridorCount;
+  /// Visual shaft cycle length (not a finish line).
+  static int get corridorCount => corridorAssetCount;
 
   /// Subway-style pace: starts calm, steps up every [speedStepMeters],
   /// then soft-caps so late run stays readable (top-runner style).
@@ -33,17 +32,24 @@ class GameConfig {
   /// Hard ceiling ≈ ×2.85 start (~34 m/s world) — was uncapped ~×5+.
   static const double speedHardCapMult = 2.85;
 
-  /// HUD/corridor meters still say 700 — but they tick this fraction of pace
-  /// (lower = longer shafts). 0.62 ≈ +17% duration vs previous 0.75.
+  /// HUD meters tick this fraction of world pace.
   static const double distanceMeterRate = 0.62;
 
-  /// World run speed with soft-cap after mid run.
-  static double runSpeedAt(double progress) {
-    final distance = (progress.clamp(0.0, 1.0)) * levelLengthMeters;
-    final step = (distance / speedStepMeters).floor();
+  /// Long mode — slightly denser loot / pressure.
+  static double get modeSpawnTempoMult =>
+      GameSettings.instance.runMode.isLong ? 1.14 : 1.0;
+
+  /// Difficulty 0→1 from meters (asymptote — no hard finish).
+  static double difficultyFromDistance(double meters) {
+    final m = meters.clamp(0.0, 100000.0);
+    return (1.0 - math.exp(-m / 1800.0)).clamp(0.0, 1.0);
+  }
+
+  /// World run speed from meters traveled.
+  static double runSpeedAt(double meters) {
+    final step = (meters.clamp(0.0, 100000.0) / speedStepMeters).floor();
     final double mult;
     if (step <= speedSoftCapStep) {
-      // 0 → ×1.0, 6 → ×2.5
       mult = 1.0 + speedStepBoost * step;
     } else {
       final soft = step - speedSoftCapStep;
@@ -55,69 +61,92 @@ class GameConfig {
   }
 
   /// How fast run-cycle anim plays vs base (matches world pace).
-  static double runAnimRateAt(double progress) {
-    final pace = runSpeedAt(progress);
+  static double runAnimRateAt(double meters) {
+    final pace = runSpeedAt(meters);
     return (pace / runSpeedStart).clamp(1.0, 2.9);
   }
 
-  /// Spawn density — rises, but softer than before so late air remains.
+  /// Spawn density from difficulty 0–1 (+ mode mult).
   static double spawnTempoAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
-    // Was +125% → now +90%, with a flatter last third.
     final shaped = t < 0.66 ? t : 0.66 + (t - 0.66) * 0.55;
-    return 1.0 + shaped * 0.9;
+    return (1.0 + shaped * 0.9) * modeSpawnTempoMult;
   }
 
-  /// Hot chase — ~15% easier than first rivalry pass (thief less oppressive).
+  /// Hot chase — player lead stays tight; thief gap uses meters (see min).
   static const double startLeadDistance = 3.7;
   static const double maxLeadDistance = 4.0;
-  /// Thief can pull up to ~10 m ahead on a long mistake streak.
-  static const double minLeadDistance = -10.0;
+  /// Thief can bolt up to this many meters ahead (HUD shows the gap).
+  static const double minLeadDistance = -200.0;
+  /// Soft banner when he is far enough to leave the screen (no lose).
+  static const double thiefEscapeLead = -32.0;
+  /// Legacy — escape no longer ends the run.
+  static const double thiefEscapeSeconds = 10.0;
+  /// Visual: beyond this gap he stays off the top (gap lives in HUD).
+  static const double thiefOffScreenLead = -40.0;
 
-  /// Coins never push lead (columns are free score). Lead is jewel/mistake based.
+  /// Coins while YOU lead — score only. Catch-up uses [leadGainOnCoinCatchUp].
   static const double leadGainOnCatch = 0.0;
   /// Jewels are the contested prize — catching them opens the gap.
   static const double leadGainOnRare = 2.07;
   static const double leadGainOnCombo = 1.38;
   /// Extra lead meters added for each jewel catch in a success streak.
   static const double successStreakLeadBonus = 0.46;
-  /// Miss a coin — thief closes in (the real chase pressure).
-  static const double leadLossOnMiss = 1.06;
-  static const double leadLossOnMissRare = 1.49;
-  static const double leadLossOnBomb = 1.23;
-  static const double leadLossPerMistakeStreak = 0.47;
-  /// How fast pending chase debt drains into real lead (m/s).
-  static const double leadDebtPerSec = 1.40;
-  /// Enough debt to push thief toward the full −10 m gap.
-  static const double leadDebtMax = 7.2;
-  /// Slow recover only while playing clean (no misses).
+
+  /// While thief leads: each clean coin chips the gap (readable meters).
+  static const double leadGainOnCoinCatchUp = 2.8;
+  /// Extra per unbroken coin in the streak (soft, capped in-game).
+  static const double leadGainOnCoinCatchUpStreak = 0.35;
+  static const double catchUpLeadMaxPerCoin = 6.5;
+  /// Coins also burn chase debt so recover can kick in.
+  static const double catchUpDebtBurnPerCoin = 2.2;
+  /// Steady close while clean AND thief ahead (m/s) — no mistakes.
+  static const double catchUpRecoverPerSec = 4.2;
+
+  /// How hard catch-up hits by gap depth (0 at even → stronger when he bolted).
+  static double catchUpDepthMult(double leadDistance) {
+    if (leadDistance >= 0) return 0;
+    final depth = (-leadDistance / -minLeadDistance).clamp(0.0, 1.0);
+    return 0.75 + depth * 0.85;
+  }
+
+  /// Miss a coin — thief opens the meter gap.
+  static const double leadLossOnMiss = 5.5;
+  static const double leadLossOnMissRare = 7.5;
+  static const double leadLossOnBomb = 8.5;
+  static const double leadLossPerMistakeStreak = 2.2;
+  /// How fast pending chase debt drains into real lead (m/s) — smoother.
+  static const double leadDebtPerSec = 6.5;
+  /// Cap so one bad streak can't dump the full 200 m instantly.
+  static const double leadDebtMax = 55.0;
+  /// Slow recover toward start lead while you already lead (clean play).
   static const double leadRecoverPerSec = 0.092;
   /// How fast the thief eases when you pull ahead (goes back).
   static const double leadVisualFollow = 1.35;
   /// How fast he eases when closing after your mistakes (slow approach).
-  static const double leadVisualFollowMistake = 0.81;
+  static const double leadVisualFollowMistake = 0.62;
   /// Extra smoothing on thief screen Y (kills leftover hops).
   static const double thiefYSmooth = 4.2;
   static const double thiefScaleSmooth = 5.0;
 
-  static const double overtakeDuration = 1.55;
-  /// Thief takes the lead after a blunder — slow glide past you.
-  static const double overtakeSprintDuration = 1.9;
+  static const double overtakeDuration = 1.75;
+  /// Thief takes the lead after a blunder — longer glide, less snap.
+  static const double overtakeSprintDuration = 2.45;
   /// Show faint chase arrow once the thief is this far behind.
   static const double chaseArrowLeadMin = 2.2;
   static const int comboThreshold = 8;
 
-  // ── Thief momentum bursts (rivalry waves) — ~15% softer / rarer ───────────
-  static const double thiefBurstDuration = 2.2;
-  static const double thiefBurstMetersMin = 98;
-  static const double thiefBurstMetersMax = 138;
+  // ── Thief momentum bursts — softer / rarer, less "rocket" ─────────────────
+  static const double thiefBurstDuration = 1.85;
+  static const double thiefBurstMetersMin = 110;
+  static const double thiefBurstMetersMax = 155;
   /// Extra closing speed while bursting (on top of debt drain).
-  static const double thiefBurstClosePerSec = 1.15;
+  static const double thiefBurstClosePerSec = 4.8;
   /// Debt drain multiplier during a burst.
-  static const double thiefBurstDebtMult = 1.45;
-  /// Mistake streak that can trigger an early burst.
-  static const int thiefBurstFromMistakes = 2;
-  static const double thiefBurstCooldown = 16;
+  static const double thiefBurstDebtMult = 1.10;
+  /// Mistake streak that can trigger an early burst (1 miss = no sprint).
+  static const int thiefBurstFromMistakes = 3;
+  static const double thiefBurstCooldown = 20;
   /// Stronger steal vacuum while bursting.
   static const double thiefBurstMagnetRadius = 128;
   static const double thiefBurstMagnetPullSpeed = 264;
@@ -182,12 +211,10 @@ class GameConfig {
   static const double basketWidth = 58;
   static const double basketHeight = 32;
 
-  /// Last meters: sprint denser loot + finish beat.
-  static const double finaleMeters = 100;
-  /// Spawn gaps shrink in the final sprint (was 0.58 — more air now).
+  /// Legacy finale knobs — unused in endless (kept for spawn refs).
+  static const double finaleMeters = 0;
   static const double finaleSpawnGapMult = 0.72;
-  /// Slight world rush (not slow-mo) for the last push.
-  static const double finalePlayRate = 1.06;
+  static const double finalePlayRate = 1.0;
 
   // ── Coin combo multiplier (Subway-style) ─────────────────────────────────
   /// Unbroken gold streak for ×2.
@@ -200,16 +227,18 @@ class GameConfig {
   /// Falling loot sizes — jewels share one square so corridor crops look even.
   static const double jewelDisplaySize = 48;
   static const double lootDisplaySize = 38;
-  /// Base bomb size — scaled up further at high run pace in-game.
-  static const double bombDisplaySize = 54;
-  /// Extra bomb scale at full pace (1 = base, 1.22 = +22% when fast).
-  static const double bombSpeedScaleMax = 1.22;
+  /// One size for every bomb (square crop → square draw, no squash).
+  static const double bombDisplaySize = 48;
+  /// Unused — pace no longer scales bombs.
+  static const double bombSpeedScaleMax = 1.0;
   /// Dynamite minecart — larger readable hazard, same explosive rules as bomb.
   static const double dynamiteCartDisplaySize = 64;
-  /// Chance a bomb spawn slot becomes a dynamite cart instead.
-  static const double dynamiteCartChance = 0.32;
+  /// Single-lane bomb slot → slow minecart (readable, not every gate).
+  static const double dynamiteCartChance = 0.14;
+  /// Cart drifts slower than normal fall so it reads as “rolling in”.
+  static const double dynamiteCartSpeedMult = 0.72;
   /// Slightly harsher chase hit than a plain bomb.
-  static const double leadLossOnDynamiteCart = 1.35;
+  static const double leadLossOnDynamiteCart = 10.0;
 
   static const double magnetRadius = 16;
   static const double magnetPullSpeed = 45;
@@ -228,11 +257,13 @@ class GameConfig {
   static const double magnetRespawnMin = 22;
   static const double magnetRespawnMax = 38;
 
-  // ── Heart (1 per run — saves explosives / pit / spikes) ──────────────────
+  // ── Hearts (stack to 3 — shield vs pit / spikes; also absorbs bomb) ─────
   static const double heartDisplaySize = 40;
-  /// Slightly more common so one lethal mistake isn't pure RNG.
-  static const double heartSpawnChance = 0.10;
-  static const double heartRespawnMin = 28;
+  static const int maxHearts = 3;
+  /// Can drop more than once per run until stack is full (pickup soft-caps).
+  static const double heartSpawnChance = 0.12;
+  static const double heartRespawnMin = 18;
+  static const double heartRespawnMax = 28;
   static const double heartIFrameSec = 0.45;
 
   // ── Potion boost (1 per run — answer thief lead) ─────────────────────────
@@ -246,6 +277,12 @@ class GameConfig {
   static const double catchRadius = 26;
   /// Bombs: circular center-to-center touch only — near misses never explode.
   static const double bombCatchRadius = 15;
+  /// Body brush for loot only (coins) — a bit forgiving.
+  static const double bodyCatchLootHalfW = 26;
+  static const double bodyCatchLootHalfH = 32;
+  /// Hazards: must nearly overlap the sprite — no “near miss” side hits.
+  static const double bodyCatchHazardHalfW = 15;
+  static const double bodyCatchHazardHalfH = 16;
 
   // ── Web (spider net) hazard ──────────────────────────────────────────────
   static const double webDisplaySize = 42;
@@ -253,12 +290,36 @@ class GameConfig {
   static const double webCatchRadius = 13;
   /// Web appears from this 1-based shaft onward (1 = from the start).
   static const int webFromCorridor = 1;
-  /// Chance a normal spawn beat becomes a web (once eligible). +10% traps.
-  static const double webSpawnChance = 0.11;
-  /// Rare combo: double web → pit (legacy; prefer [webPitComboChanceAt]).
-  static const double webPitComboChance = 0.035;
-  static const double webPitComboCooldownMin = 22;
-  static const double webPitComboCooldownMax = 36;
+  /// Chance a normal spawn beat becomes a web (once eligible).
+  static const double webSpawnChance = 0.105;
+  /// Shared spacing so web + spikes don't stack in the same window.
+  static const double laneTrapSpacingSec = 2.6;
+  /// Combo difficulty steps every N meters (with run tempo).
+  static const double trapComboTierMeters = 200;
+  /// Rare combo: web → pit (legacy; prefer [webPitComboChanceAt]).
+  static const double webPitComboChance = 0.045;
+  static const double webPitComboCooldownMin = 18;
+  static const double webPitComboCooldownMax = 30;
+  /// Bomb dodge → spikes ~5 m later (same / escape lane).
+  static const double bombSpikesComboChance = 0.055;
+  static const double bombSpikesComboCooldownMin = 16;
+  static const double bombSpikesComboCooldownMax = 28;
+  static const double bombSpikesGapMeters = 5.0;
+  static const double webSpikesComboChance = 0.05;
+  static const double spikesPitComboChance = 0.045;
+  static const double zigzagBombChance = 0.06;
+  /// Dual gate → web on free lane → pit (squeeze the escape).
+  static const double gateWebPitChance = 0.05;
+  /// Bomb → web on dodge → spikes (sticky punish).
+  static const double bombWebSpikesChance = 0.048;
+  /// Spikes + pit on two lanes nearly together (split choice).
+  static const double splitFloorChance = 0.042;
+  /// L/R bomb weave → pit in the middle (classic runner sandwich).
+  static const double bombSandwichPitChance = 0.045;
+  /// Web → short zigzag bombs while sticky.
+  static const double stickyZigzagChance = 0.04;
+  /// Dual free lane → pit on free → spikes on bait (double fake-safe).
+  static const double fakeSafeDoubleChance = 0.038;
   /// How long the player stays sticky/slow after touching a web.
   static const double webSnareDuration = 3.0;
   /// Player control sluggishness while snared (1 = normal, lower = slower).
@@ -266,12 +327,12 @@ class GameConfig {
   /// World + stride slow while snared (bomb-like hitch, a bit softer).
   static const double webSnarePlayRate = 0.55;
   /// Chase pressure — close to a bomb, but no crystal loss.
-  static const double leadLossOnWeb = 1.02;
+  static const double leadLossOnWeb = 6.5;
 
   /// Three dodge lanes — always at least one clear row to slip through.
   static const int bombLaneCount = 3;
   /// Chance a bomb beat is a 2-lane gate (one free lane) instead of a single.
-  static const double bombDualChance = 0.55;
+  static const double bombDualChance = 0.48;
   /// Min/max pause before the next bomb pattern — denser timing traps.
   static const double bombCooldownMin = 0.95;
   static const double bombCooldownMax = 1.85;
@@ -284,36 +345,52 @@ class GameConfig {
   static const double pitSpawnChance = 0.10;
   /// No lethal floors in the opening stretch (teach jewels / bombs first).
   static const double pitUnlockProgress = 0.14;
-  static const double pitRespawnMin = 9.0;
-  static const double pitRespawnMax = 16.0;
+  static const double pitRespawnMin = 12.0;
+  static const double pitRespawnMax = 20.0;
   /// Suck-into-pit cinematic length (seconds).
   static const double pitSuckDuration = 0.78;
 
-  /// Direct pit roll scales with progress (0 early → ~0.11 late).
+  /// Direct pit roll scales with progress (0 early → ~0.09 late).
   static double pitSpawnChanceAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
     if (t < pitUnlockProgress) return 0;
     final u = ((t - pitUnlockProgress) / (1.0 - pitUnlockProgress)).clamp(0.0, 1.0);
-    return 0.05 + u * 0.06;
+    return 0.044 + u * 0.044;
   }
 
   /// Web→pit combo only after the player has learned the chase.
   static double webPitComboChanceAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
-    if (t < 0.22) return 0;
-    return 0.028 + (t - 0.22) / 0.78 * 0.025;
+    if (t < 0.18) return 0;
+    return 0.038 + (t - 0.18) / 0.82 * 0.028;
   }
 
-  // ── Spikes — lethal floor (same fail path as pit) ─────────────────────────
-  static const double spikesDisplaySize = 58;
-  static const double spikesCatchRadius = 20;
-  /// Legacy mid value — prefer [spikesChanceAt].
+  /// Bomb→spikes chance — unlock gated by meters tier in SpawnDirector.
+  static double bombSpikesComboChanceAt(double progress) {
+    final t = progress.clamp(0.0, 1.0);
+    return bombSpikesComboChance + t * 0.02;
+  }
+
+  // ── Spikes — separate lethal floor (not pits) ─────────────────────────────
+  /// Width of spikes sprite on the path.
+  static const double spikesDisplaySize = 88;
+  /// Height / width for current hazards/spikes.png (1536×1024).
+  static const double spikesAspect = 1024 / 1536;
+  static const double spikesCatchRadius = 26;
+  /// Interrupt chance on a loot beat (own path — not tied to pits).
+  static const double spikesSpawnChance = 0.16;
+  /// Designed spikes pattern from director (from run start).
+  static const double spikesDirectorChance = 0.09;
+  static const double spikesRespawnMin = 9.0;
+  static const double spikesRespawnMax = 16.0;
+  /// Spikes from run start (same as webs) — not gated behind pit unlock.
+  static const int spikesFromCorridor = 1;
+  /// Legacy — unused (pit beats stay pits).
   static const double spikesChance = 0.32;
 
-  /// Spikes share of lethal floors: quieter early, more variety late.
   static double spikesChanceAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
-    return 0.18 + t * 0.22;
+    return 0.55 + t * 0.2;
   }
 
   /// Opening beat — thief close on camera so the chase reads immediately.
@@ -359,7 +436,8 @@ class GameConfig {
   static const double thiefAheadScale = 0.72;
 
   /// 1-based shaft: blue thief joins from this corridor onward (after 6).
-  static const int blueThiefFromCorridor = 7;
+  /// @Deprecated — blue thief is mode-based (Long = 2 thieves from start).
+  static const int blueThiefFromCorridor = 999;
   static const double thiefLaneOffsetX = 44;
   static const double thiefPassExtraX = 58;
   static const double thiefMinClearanceX = 56;

@@ -5,17 +5,20 @@ import 'package:flutter/material.dart';
 class GroundShadow extends PositionComponent {
   GroundShadow() : super(anchor: Anchor.center, priority: -1);
 
+  final Paint _outer = Paint()..color = Colors.black.withValues(alpha: 0.38);
+  final Paint _inner = Paint()..color = Colors.black.withValues(alpha: 0.22);
+
   @override
   void render(Canvas canvas) {
     final w = size.x;
     final h = size.y;
     canvas.drawOval(
       Rect.fromCenter(center: Offset.zero, width: w, height: h),
-      Paint()..color = Colors.black.withValues(alpha: 0.38),
+      _outer,
     );
     canvas.drawOval(
       Rect.fromCenter(center: Offset.zero, width: w * 0.7, height: h * 0.65),
-      Paint()..color = Colors.black.withValues(alpha: 0.22),
+      _inner,
     );
   }
 }

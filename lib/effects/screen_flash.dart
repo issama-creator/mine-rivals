@@ -13,6 +13,10 @@ class ScreenFlash extends Component {
   final double peakAlpha;
   final double duration;
   double _t = 0;
+  final Paint _paint = Paint();
+  double _lastW = -1;
+  double _lastH = -1;
+  late Rect _rect;
 
   @override
   void update(double dt) {
@@ -25,14 +29,19 @@ class ScreenFlash extends Component {
   void render(Canvas canvas) {
     final game = findGame();
     if (game == null) return;
+    final w = game.size.x;
+    final h = game.size.y;
+    if (w != _lastW || h != _lastH) {
+      _lastW = w;
+      _lastH = h;
+      _rect = Rect.fromLTWH(0, 0, w, h);
+    }
     final t = (_t / duration).clamp(0.0, 1.0);
     // Soft rise, long soft fall.
     final a = t < 0.25
         ? (t / 0.25) * peakAlpha
         : peakAlpha * (1 - ((t - 0.25) / 0.75));
-    canvas.drawRect(
-      Offset.zero & Size(game.size.x, game.size.y),
-      Paint()..color = color.withValues(alpha: a.clamp(0.0, 1.0)),
-    );
+    _paint.color = color.withValues(alpha: a.clamp(0.0, 1.0));
+    canvas.drawRect(_rect, _paint);
   }
 }

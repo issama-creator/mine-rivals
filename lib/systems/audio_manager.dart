@@ -21,7 +21,7 @@ class AudioManager {
         'overtake.wav',
         'steal.wav',
         'miss.wav',
-      ]);
+      ]).timeout(const Duration(seconds: 8));
       _assetsReady = true;
     } catch (_) {
       _assetsReady = false;
@@ -47,6 +47,10 @@ class AudioManager {
         SystemSound.play(SystemSoundType.click);
     }
   }
+
+  /// Finish sting — win feels brighter than loss (same assets, different key).
+  Future<void> playFinish({required bool won}) =>
+      play(won ? 'combo' : 'miss');
 
   /// Coin streak pitch-up — each catch a bit higher (Subway-style combo feel).
   Future<void> playCatchPitched(double pitch) async {
@@ -83,7 +87,6 @@ class AudioManager {
       case 'combo':
         HapticFeedback.lightImpact();
       case 'miss':
-        HapticFeedback.selectionClick();
       case 'catch':
         HapticFeedback.selectionClick();
       default:

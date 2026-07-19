@@ -17,17 +17,35 @@ class CorridorTitle extends PositionComponent with HasPaint {
   double _life = 0;
   static const double _duration = 2.4;
   TextPainter? _cached;
+  int _alphaBucket = -1;
+  final Paint _linePaint = Paint()
+    ..strokeWidth = 1.4
+    ..strokeCap = StrokeCap.round;
 
   @override
   void onLoad() {
+    _rebuildText(1);
+  }
+
+  void _rebuildText(double a) {
     _cached = TextPainter(
       text: TextSpan(
         text: label,
-        style: const TextStyle(
-          color: Color(0xFFFFE082),
+        style: TextStyle(
+          color: Color(0xFFFFE082).withValues(alpha: a * 0.96),
           fontSize: 17,
           fontWeight: FontWeight.w800,
           letterSpacing: 1.2,
+          shadows: [
+            Shadow(
+              blurRadius: 12,
+              color: Colors.black.withValues(alpha: a * 0.75),
+            ),
+            Shadow(
+              blurRadius: 18,
+              color: const Color(0xFFFFB300).withValues(alpha: a * 0.25),
+            ),
+          ],
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -61,43 +79,25 @@ class CorridorTitle extends PositionComponent with HasPaint {
 
     // Soft gold underline.
     final lineW = 72.0 * a;
+    _linePaint.color = const Color(0xFFFFE082).withValues(alpha: a * 0.55);
     canvas.drawLine(
       Offset(size.x * 0.5 - lineW * 0.5, size.y - 4 + slide),
       Offset(size.x * 0.5 + lineW * 0.5, size.y - 4 + slide),
-      Paint()
-        ..color = const Color(0xFFFFE082).withValues(alpha: a * 0.55)
-        ..strokeWidth = 1.4
-        ..strokeCap = StrokeCap.round,
+      _linePaint,
     );
 
+    // Rebuild text ~20 alpha steps — avoids per-frame TextPainter alloc.
+    final bucket = (a * 20).round();
+    if (bucket != _alphaBucket) {
+      _alphaBucket = bucket;
+      _rebuildText(a);
+    }
     final tp = _cached;
     if (tp == null) return;
-    final textPaint = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: TextStyle(
-          color: const Color(0xFFFFE082).withValues(alpha: a * 0.96),
-          fontSize: 17,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1.2,
-          shadows: [
-            Shadow(
-              blurRadius: 12,
-              color: Colors.black.withValues(alpha: a * 0.75),
-            ),
-            Shadow(
-              blurRadius: 18,
-              color: const Color(0xFFFFB300).withValues(alpha: a * 0.25),
-            ),
-          ],
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
 
-    textPaint.paint(
+    tp.paint(
       canvas,
-      Offset((size.x - textPaint.width) * 0.5, (size.y - textPaint.height) * 0.35 + slide),
+      Offset((size.x - tp.width) * 0.5, (size.y - tp.height) * 0.35 + slide),
     );
   }
 }

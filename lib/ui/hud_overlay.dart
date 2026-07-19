@@ -33,9 +33,10 @@ class _HudOverlayState extends State<HudOverlay> {
   int _lastShaft = -1;
   int _lastMagnetSec = -1;
   bool _lastYouLead = true;
+  int _lastThiefGap = -1;
   bool _lastBurst = false;
   bool _lastBreath = false;
-  bool _lastHeart = false;
+  int _lastHearts = -1;
   bool _lastPotion = false;
   bool _lastCanPotion = false;
   bool _lastPotionBoost = false;
@@ -50,19 +51,21 @@ class _HudOverlayState extends State<HudOverlay> {
       final g = widget.game;
       final you = g.stats.player.rareTotal;
       final thief = g.stats.thief.rareTotal;
-      final run = g.distance.round();
+      // Throttle meter rebuilds — every ~3 m is enough for the big readout.
+      final run = (g.distance / 3).floor() * 3;
       final gold = g.stats.player.gold;
       final mult = g.coinMultiplier;
       final jewelCombo = g.jewelStreak;
       final shaft = (g.distance / GameConfig.corridorSegmentMeters)
-          .floor()
-          .clamp(0, GameConfig.corridorCount - 1);
+          .floor() %
+          GameConfig.corridorAssetCount;
       final lead = g.lead.logicalLeader == Leader.player;
+      final thiefGap = g.thiefGapMeters;
       final banner = g.bannerText;
       final magnetSec = g.magnetPowerSeconds.ceil();
       final burst = g.isThiefBursting;
       final breath = g.isThiefBreathing;
-      final heart = g.hasHeart;
+      final hearts = g.hearts;
       final potion = g.hasPotion;
       final canPotion = g.canUsePotion;
       final potionBoost = g.isPotionBoosting;
@@ -74,11 +77,12 @@ class _HudOverlayState extends State<HudOverlay> {
           jewelCombo == _lastJewelCombo &&
           shaft == _lastShaft &&
           lead == _lastYouLead &&
+          thiefGap == _lastThiefGap &&
           banner == _lastBanner &&
           magnetSec == _lastMagnetSec &&
           burst == _lastBurst &&
           breath == _lastBreath &&
-          heart == _lastHeart &&
+          hearts == _lastHearts &&
           potion == _lastPotion &&
           canPotion == _lastCanPotion &&
           potionBoost == _lastPotionBoost) {
@@ -92,11 +96,12 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastJewelCombo = jewelCombo;
       _lastShaft = shaft;
       _lastYouLead = lead;
+      _lastThiefGap = thiefGap;
       _lastBanner = banner;
       _lastMagnetSec = magnetSec;
       _lastBurst = burst;
       _lastBreath = breath;
-      _lastHeart = heart;
+      _lastHearts = hearts;
       _lastPotion = potion;
       _lastCanPotion = canPotion;
       _lastPotionBoost = potionBoost;
@@ -211,10 +216,10 @@ class _HudOverlayState extends State<HudOverlay> {
     final thiefRare = game.stats.thief.rareTotal;
     final youLead = game.lead.logicalLeader == Leader.player;
     final shaft = (game.distance / GameConfig.corridorSegmentMeters)
-            .floor()
-            .clamp(0, GameConfig.corridorCount - 1) +
+            .floor() %
+            GameConfig.corridorAssetCount +
         1;
-    final shafts = GameConfig.corridorCount;
+    final shafts = GameConfig.corridorAssetCount;
     final runLabel = _formatMeters(runM);
 
     return SafeArea(
@@ -289,12 +294,14 @@ class _HudOverlayState extends State<HudOverlay> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          youLead ? 'Ты впереди' : 'Вор впереди',
+                          youLead
+                              ? 'Ты впереди'
+                              : 'Вор +${game.thiefGapMeters} м',
                           style: TextStyle(
                             color: youLead
                                 ? const Color(0xFF81C784)
                                 : const Color(0xFFFF8A65),
-                            fontSize: 11,
+                            fontSize: youLead ? 11 : 13,
                             fontWeight: FontWeight.w800,
                             shadows: const [
                               Shadow(color: Colors.black54, blurRadius: 3),
@@ -330,17 +337,18 @@ class _HudOverlayState extends State<HudOverlay> {
                         ),
                       ),
                     ),
-                    if (game.hasHeart || game.hasPotion) ...[
+                    if (game.hearts > 0 || game.hasPotion) ...[
                       const SizedBox(height: 6),
-                      if (game.hasHeart)
+                      if (game.hearts > 0)
                         IgnorePointer(
                           child: _PowerChip(
                             icon: Icons.favorite_rounded,
                             color: const Color(0xFFFF5252),
                             active: true,
+                            badge: '${game.hearts}',
                           ),
                         ),
-                      if (game.hasHeart && game.hasPotion)
+                      if (game.hearts > 0 && game.hasPotion)
                         const SizedBox(height: 6),
                       if (game.hasPotion)
                         Material(
@@ -738,11 +746,13 @@ class _PowerChip extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.active,
+    this.badge,
   });
 
   final IconData icon;
   final Color color;
   final bool active;
+  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -755,7 +765,29 @@ class _PowerChip extends StatelessWidget {
       child: SizedBox(
         width: 40,
         height: 40,
-        child: Icon(icon, size: 22, color: color),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(icon, size: 22, color: color),
+            if (badge != null)
+              Positioned(
+                right: 3,
+                bottom: 2,
+                child: Text(
+                  badge!,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 11,
+                    height: 1,
+                    shadows: const [
+                      Shadow(color: Colors.black87, blurRadius: 2),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

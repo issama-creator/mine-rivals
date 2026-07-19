@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../game/mine_rivals_game.dart';
 
-/// One-time 3-beat intro: dodge → crystals → thief.
+/// One-time 2-beat intro: dodge → crystals vs thief.
 class TutorialOverlay extends StatefulWidget {
   const TutorialOverlay({super.key, required this.game});
 
@@ -24,13 +24,9 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
     ),
     (
       icon: Icons.diamond_rounded,
-      title: 'Собирай кристаллы',
-      body: 'Цветные камни — твоя добыча. Их считает гонка с вором.',
-    ),
-    (
-      icon: Icons.directions_run_rounded,
-      title: 'Вор ворует',
-      body: 'Если он впереди — забирает кристаллы. Не дай удрать!',
+      title: 'Кристаллы и вор',
+      body:
+          'Цветные камни решают гонку. Если вор впереди — он их крадёт. Не дай удрать!',
     ),
   ];
 
@@ -80,19 +76,19 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                           color: const Color(0xFFFFCA28).withValues(alpha: 0.9),
                           fontWeight: FontWeight.w900,
                           fontSize: 13,
-                          letterSpacing: 1.2,
+                          letterSpacing: 2,
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      Icon(step.icon, size: 52, color: const Color(0xFFFFE082)),
+                      const SizedBox(height: 16),
+                      Icon(step.icon, color: const Color(0xFFFFB300), size: 44),
                       const SizedBox(height: 14),
                       Text(
                         step.title,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
+                          color: Color(0xFFFFE082),
                           fontWeight: FontWeight.w900,
+                          fontSize: 24,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -100,9 +96,9 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                         step.body,
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          fontSize: 16,
+                          color: Colors.white.withValues(alpha: 0.78),
                           fontWeight: FontWeight.w600,
+                          fontSize: 16,
                           height: 1.35,
                         ),
                       ),
@@ -111,12 +107,13 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           for (var i = 0; i < _steps.length; i++) ...[
-                            if (i > 0) const SizedBox(width: 6),
-                            Container(
-                              width: i == _step ? 16 : 7,
-                              height: 7,
+                            if (i > 0) const SizedBox(width: 8),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              width: i == _step ? 18 : 8,
+                              height: 8,
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(99),
+                                borderRadius: BorderRadius.circular(4),
                                 color: i == _step
                                     ? const Color(0xFFFFB300)
                                     : Colors.white24,
@@ -128,22 +125,21 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
                       const SizedBox(height: 20),
                       SizedBox(
                         width: double.infinity,
-                        height: 52,
+                        height: 56,
                         child: FilledButton(
                           onPressed: _next,
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFFFFB300),
                             foregroundColor: const Color(0xFF3E2723),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(16),
                             ),
                           ),
                           child: Text(
                             last ? 'ПОГНАЛИ!' : 'ДАЛЬШЕ',
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 17,
-                              letterSpacing: 0.5,
+                              fontSize: 18,
                             ),
                           ),
                         ),

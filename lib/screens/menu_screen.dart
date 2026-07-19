@@ -4,7 +4,6 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../game/asset_library.dart';
 import '../game/mine_rivals_game.dart';
 import '../game/player_skins.dart';
 import '../systems/game_settings.dart';
@@ -37,13 +36,8 @@ class _MenuScreenState extends State<MenuScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..forward();
-    // Paint menu first; warm assets after a short delay so UI never freezes.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future<void>.delayed(const Duration(milliseconds: 400), () {
-        if (!mounted) return;
-        unawaited(AssetLibrary.warmUp());
-      });
-    });
+    // No AssetLibrary warm-up on menu — heavy decode caused ANR.
+    // GameScreen / loadingBuilder loads assets when a run starts.
   }
 
   @override
@@ -55,14 +49,17 @@ class _MenuScreenState extends State<MenuScreen>
 
   void _startGame() {
     HapticFeedback.mediumImpact();
+    // Opaque + short fade — a long fade kept the menu under a stuck loader.
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 600),
-        reverseTransitionDuration: const Duration(milliseconds: 400),
-        pageBuilder: (_, animation, __) {
+        opaque: true,
+        transitionDuration: const Duration(milliseconds: 220),
+        reverseTransitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (_, __, ___) => const GameScreen(),
+        transitionsBuilder: (_, animation, __, child) {
           return FadeTransition(
             opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
-            child: const GameScreen(),
+            child: child,
           );
         },
       ),
@@ -114,10 +111,14 @@ class _MenuScreenState extends State<MenuScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Full-bleed mine tunnel
+          // Full-bleed mine tunnel (decode at screen width — full PNG is ~1.8MB)
           Image.asset(
             'assets/tunnel.png',
             fit: BoxFit.cover,
+            cacheWidth: (MediaQuery.sizeOf(context).width *
+                    MediaQuery.devicePixelRatioOf(context))
+                .round()
+                .clamp(480, 1440),
             alignment: Alignment.center,
           ),
           DecoratedBox(
@@ -300,16 +301,6 @@ class _MenuScreenState extends State<MenuScreen>
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(height: 14),
-                          Text(
-                            'Лови цветные камни — не дай вору!',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.5),
-                              fontSize: 12,
-                              letterSpacing: 0.2,
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -338,7 +329,7 @@ class _RunModePicker extends StatelessWidget {
     return Column(
       children: [
         Text(
-          'ДИСТАНЦИЯ',
+          'РЕЖИМ',
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.45),
             fontSize: 11,
@@ -379,6 +370,11 @@ class _ModeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final record = ProgressStore.instance.bestDistanceFor(mode);
+    final recordLine = record > 0
+        ? '${mode.blurbRu} · $record м'
+        : mode.blurbRu;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -414,7 +410,7 @@ class _ModeChip extends StatelessWidget {
               ),
               const SizedBox(height: 3),
               Text(
-                mode.subtitleRu,
+                recordLine,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: selected
@@ -824,10 +820,7 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
     HapticFeedback.selectionClick();
     setState(() => _selected = skin.id);
     unawaited(ProgressStore.instance.selectSkin(skin.id));
-    // Prefetch run sheet in background so Play doesn't hitch.
-    unawaited(
-      AssetLibrary.ensureLoaded().then((_) => AssetLibrary.ensureSkinLoaded(skin.id)),
-    );
+    // Don't decode run sheets on the menu — that froze mid-tier Android.
   }
 
   @override
@@ -1065,19 +1058,11 @@ class _LocalRecordsStrip extends StatelessWidget {
     final store = ProgressStore.instance;
     final dist = store.bestDistanceMeters;
     final rares = store.bestRares;
-    if (dist <= 0 && rares <= 0) {
-      return Text(
-        'Рекорд появится после первого забега',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.45),
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
-      );
-    }
+    // Menu stays clean — streak / week / FOMO live in Миссии.
     return Text(
-      'Рекорд: $dist м · $rares крист.',
+      dist <= 0 && rares <= 0
+          ? 'Рекорд появится после первого забега'
+          : 'Рекорд: $dist м · $rares крист.',
       textAlign: TextAlign.center,
       style: TextStyle(
         color: const Color(0xFFFFE082).withValues(alpha: 0.85),
@@ -1132,7 +1117,7 @@ class _MissionSticker extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  'Миссии',
+                  'Задания',
                   style: TextStyle(
                     color: allDone
                         ? const Color(0xFF81C784)
@@ -1179,7 +1164,10 @@ class _DailyMissionsSheet extends StatelessWidget {
     final store = ProgressStore.instance;
     final missions = DailyMissions.forToday();
     final doneCount = missions.where((m) => store.isDone(m.id)).length;
-    final streak = store.missionStreak;
+    final streakGoal = store.nextStreakUnlock();
+    final prizeName = streakGoal?.skinName ?? 'скин';
+    final day = store.missionStreak.clamp(0, streakGoal?.atStreak ?? 7);
+    final need = streakGoal?.atStreak ?? 7;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
@@ -1212,57 +1200,107 @@ class _DailyMissionsSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 const Text(
-                  'Миссии на сегодня',
+                  'Задания',
                   style: TextStyle(
                     color: Color(0xFFFFE082),
                     fontWeight: FontWeight.w900,
-                    fontSize: 20,
+                    fontSize: 22,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Серия: $streak дн. · $doneCount/${missions.length} сегодня',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.65),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
+                const SizedBox(height: 12),
+                // One prize block — like Subway challenge reward.
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: const Color(0xFFFFB300).withValues(alpha: 0.12),
+                    border: Border.all(
+                      color: const Color(0xFFFFB300).withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.card_giftcard_rounded,
+                          color: Color(0xFFFFE082),
+                          size: 28,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                prizeName,
+                                style: const TextStyle(
+                                  color: Color(0xFFFFE082),
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                streakGoal == null
+                                    ? 'Все скины открыты'
+                                    : 'Закрой все задания $need дней подряд',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.65),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (streakGoal != null)
+                          Text(
+                            '$day/$need',
+                            style: const TextStyle(
+                              color: Color(0xFFFFB300),
+                              fontWeight: FontWeight.w900,
+                              fontSize: 18,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Серия дней · неделя · рекорд дистанции → скины',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: const Color(0xFFFFB300).withValues(alpha: 0.75),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Сегодня  $doneCount/${missions.length}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.55),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 8),
                 for (final m in missions) ...[
                   _MissionRow(mission: m),
                   const SizedBox(height: 8),
                 ],
-                const _WeeklyMissionRow(),
-                Builder(
-                  builder: (context) {
-                    final next = store.nextCareerUnlock();
-                    if (next == null) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        'Рекорд ${next.meters} м → ${next.skinName}',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    );
-                  },
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'На неделе',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.55),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
+                const _WeeklyMissionRow(),
+                const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
                   height: 48,
@@ -1308,19 +1346,19 @@ class _WeeklyMissionRow extends StatelessWidget {
         border: Border.all(
           color: done
               ? const Color(0xFF81C784).withValues(alpha: 0.7)
-              : const Color(0xFFCE93D8).withValues(alpha: 0.55),
+              : const Color(0xFFFFB300).withValues(alpha: 0.35),
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
         child: Row(
           children: [
             Icon(
-              done ? Icons.check_circle_rounded : Icons.calendar_month_rounded,
+              done ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
               color: done
                   ? const Color(0xFF81C784)
-                  : const Color(0xFFCE93D8),
-              size: 22,
+                  : const Color(0xFFFFE082).withValues(alpha: 0.55),
+              size: 26,
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -1328,11 +1366,13 @@ class _WeeklyMissionRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Неделя · ${week.titleRu}',
+                    week.titleRu,
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.92),
+                      color: done
+                          ? const Color(0xFF81C784)
+                          : Colors.white.withValues(alpha: 0.92),
                       fontWeight: FontWeight.w800,
-                      fontSize: 13,
+                      fontSize: 15,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1340,23 +1380,25 @@ class _WeeklyMissionRow extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
                       value: t,
-                      minHeight: 5,
+                      minHeight: 7,
                       backgroundColor: Colors.white12,
                       color: done
                           ? const Color(0xFF81C784)
-                          : const Color(0xFFCE93D8),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    done ? 'Готово — скин разблокирован' : '$prog / ${week.target}',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                          : const Color(0xFFFFB300),
                     ),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              done ? '✓' : '$prog/${week.target}',
+              style: TextStyle(
+                color: done
+                    ? const Color(0xFF81C784)
+                    : const Color(0xFFFFE082),
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
               ),
             ),
           ],
@@ -1389,7 +1431,7 @@ class _MissionRow extends StatelessWidget {
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
         child: Row(
           children: [
             Icon(
@@ -1397,7 +1439,7 @@ class _MissionRow extends StatelessWidget {
               color: done
                   ? const Color(0xFF81C784)
                   : const Color(0xFFFFE082).withValues(alpha: 0.55),
-              size: 24,
+              size: 26,
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -1409,12 +1451,9 @@ class _MissionRow extends StatelessWidget {
                     style: TextStyle(
                       color: done
                           ? const Color(0xFF81C784)
-                          : const Color(0xFFFFE082),
+                          : Colors.white.withValues(alpha: 0.95),
                       fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                      decoration:
-                          done ? TextDecoration.lineThrough : null,
-                      decorationColor: const Color(0xFF81C784),
+                      fontSize: 15,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1422,23 +1461,25 @@ class _MissionRow extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
                       value: t,
-                      minHeight: 5,
+                      minHeight: 7,
                       backgroundColor: Colors.white12,
                       color: done
                           ? const Color(0xFF81C784)
                           : const Color(0xFFFFB300),
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    done ? 'Выполнено' : '$prog / ${mission.target}',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
                 ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              done ? '✓' : '$prog/${mission.target}',
+              style: TextStyle(
+                color: done
+                    ? const Color(0xFF81C784)
+                    : const Color(0xFFFFE082),
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
               ),
             ),
           ],

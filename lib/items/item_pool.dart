@@ -44,13 +44,19 @@ class ItemPool {
     }
   }
 
+  /// Drop hazard instances that may hold stale placeholder sprites.
+  void clearHazards() {
+    _inactive[ItemType.spikes]!.clear();
+    _inactive[ItemType.dynamiteCart]!.clear();
+    _inactive[ItemType.pit]!.clear();
+  }
+
   ItemType rollType({required double progress}) {
     final roll = _rng.nextDouble();
-    final bombChance = 0.08 + progress * 0.1;
-    final rareChance = (0.18 + progress * 0.08) * 0.9;
+    // No random bombs here — gates only (one consistent bomb size/look).
+    final rareChance = (0.22 + progress * 0.1) * 0.9;
 
-    if (roll < bombChance) return ItemType.bomb;
-    if (roll < bombChance + rareChance) {
+    if (roll < rareChance) {
       final rares = [
         ItemType.diamond,
         ItemType.ruby,

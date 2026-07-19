@@ -57,26 +57,19 @@ class _GameLoadingScreenState extends State<GameLoadingScreen>
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Image.asset(
-            'assets/tunnel.png',
-            fit: BoxFit.cover,
-            alignment: Alignment.center,
-            errorBuilder: (_, __, ___) => const ColoredBox(
-              color: Color(0xFF1A120B),
-            ),
-          ),
-          DecoratedBox(
+          // Solid atmosphere only — decoding tunnel.png here competed with
+          // Flame asset decode and made boot feel stuck.
+          const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withValues(alpha: 0.55),
-                  Colors.black.withValues(alpha: 0.28),
-                  const Color(0xFF1A0E08).withValues(alpha: 0.85),
-                  const Color(0xFF0D0704).withValues(alpha: 0.94),
+                  Color(0xFF2A1A10),
+                  Color(0xFF1A120B),
+                  Color(0xFF0D0704),
                 ],
-                stops: const [0, 0.35, 0.72, 1],
+                stops: [0, 0.55, 1],
               ),
             ),
           ),

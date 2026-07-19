@@ -31,13 +31,18 @@ class ParallaxBackground extends PositionComponent {
     ..filterQuality = FilterQuality.none
     ..isAntiAlias = false;
   final Paint _clearPaint = Paint()..color = const Color(0xFF0E0A06);
+  final Paint _dimPaint = Paint();
+  final Vector2 _tilePos = Vector2.zero();
+  final Vector2 _tileSize = Vector2.zero();
 
   bool get isEnteringCorridor => _enterT < 1;
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    await AssetLibrary.ensureLoaded();
+    if (!AssetLibrary.ready) {
+      await AssetLibrary.ensureLoaded(prefetchRest: false);
+    }
     corridorIndex = 0;
     _tunnel = AssetLibrary.corridorAt(0);
     _prevTunnel = null;
@@ -85,10 +90,8 @@ class ParallaxBackground extends PositionComponent {
       _drawTiled(canvas, next, opacity: t);
       final dim = math.sin(math.pi * t) * 0.12;
       if (dim > 0.01) {
-        canvas.drawRect(
-          rect,
-          Paint()..color = Colors.black.withValues(alpha: dim),
-        );
+        _dimPaint.color = Colors.black.withValues(alpha: dim);
+        canvas.drawRect(rect, _dimPaint);
       }
     } else if (next != null) {
       _drawTiled(canvas, next, opacity: 1);
@@ -137,13 +140,15 @@ class ParallaxBackground extends PositionComponent {
       paint.color = Color.fromRGBO(255, 255, 255, opacity);
     }
 
+    _tileSize.setValues(tileW, tileH);
     var drawn = 0;
     for (var y = -tileH + offset; y < size.y + tileH && drawn < 8; y += period) {
       drawn++;
+      _tilePos.setValues(0, y);
       sprite.render(
         canvas,
-        position: Vector2(0, y),
-        size: Vector2(tileW, tileH),
+        position: _tilePos,
+        size: _tileSize,
         overridePaint: paint,
       );
     }

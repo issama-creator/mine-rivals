@@ -39,10 +39,12 @@ class CollectorStats {
       case ItemType.legendary:
         legendary++;
       case ItemType.bomb:
+      case ItemType.dynamiteCart:
         bombHits++;
       case ItemType.web:
       case ItemType.magnet:
       case ItemType.pit:
+      case ItemType.spikes:
       case ItemType.heart:
       case ItemType.potion:
         break;
