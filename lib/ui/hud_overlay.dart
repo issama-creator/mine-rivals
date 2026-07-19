@@ -34,6 +34,8 @@ class _HudOverlayState extends State<HudOverlay> {
   int _lastMagnetSec = -1;
   bool _lastYouLead = true;
   int _lastThiefGap = -1;
+  int _lastSeriesRound = -1;
+  int _lastMetersToCp = -1;
   bool _lastBurst = false;
   bool _lastBreath = false;
   int _lastHearts = -1;
@@ -61,6 +63,8 @@ class _HudOverlayState extends State<HudOverlay> {
           GameConfig.corridorAssetCount;
       final lead = g.lead.logicalLeader == Leader.player;
       final thiefGap = g.thiefGapMeters;
+      final seriesRound = g.seriesRound;
+      final metersToCp = g.metersToCheckpoint;
       final banner = g.bannerText;
       final magnetSec = g.magnetPowerSeconds.ceil();
       final burst = g.isThiefBursting;
@@ -78,6 +82,8 @@ class _HudOverlayState extends State<HudOverlay> {
           shaft == _lastShaft &&
           lead == _lastYouLead &&
           thiefGap == _lastThiefGap &&
+          seriesRound == _lastSeriesRound &&
+          metersToCp == _lastMetersToCp &&
           banner == _lastBanner &&
           magnetSec == _lastMagnetSec &&
           burst == _lastBurst &&
@@ -97,6 +103,8 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastShaft = shaft;
       _lastYouLead = lead;
       _lastThiefGap = thiefGap;
+      _lastSeriesRound = seriesRound;
+      _lastMetersToCp = metersToCp;
       _lastBanner = banner;
       _lastMagnetSec = magnetSec;
       _lastBurst = burst;
@@ -307,8 +315,8 @@ class _HudOverlayState extends State<HudOverlay> {
                           ),
                           child: Text(
                             youLead
-                                ? 'Ты впереди · чекпоинт 700 м'
-                                : 'Вор +${game.thiefGapMeters} м',
+                                ? 'Раунд ${game.seriesRound}/${game.seriesRounds} · ${game.metersToCheckpoint} м'
+                                : 'Вор +${game.thiefGapMeters} м · р.${game.seriesRound}/${game.seriesRounds}',
                           ),
                         ),
                       ],

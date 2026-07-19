@@ -188,12 +188,20 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   bool finishedByChoice = false;
   /// Thief claimed finish at a checkpoint while leading crystals.
   bool finishedByThiefChoice = false;
+  /// Won by clearing the full series (final round), not early cash-out.
+  bool finishedSeriesComplete = false;
   /// XP earned last commit (results / menu meta).
   int lastRunXpGain = 0;
+  /// Crystals banked into the shop wallet last commit (0 if risk burned).
+  int lastRunCrystalsGain = 0;
+  /// Had a crystal pot but didn't cash out (death / thief / forfeit).
+  bool lastRunCrystalsBurned = false;
   /// Gap banners while thief is far ahead.
   int _lastGapBannerAt = 0;
+  /// Current series round (1-based) while racing toward its checkpoint.
+  int seriesRound = 1;
   /// Next distance where Finish vs Risk is offered (or thief claims).
-  double _nextCheckpointM = GameConfig.finishCheckpointMeters;
+  double _nextCheckpointM = GameConfig.seriesRoundMeters;
   bool _checkpointOpen = false;
   bool _taughtMagnet = false;
   bool _taughtHeart = false;
@@ -315,6 +323,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _layoutActors();
     _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
     started = true;
+    unawaited(_applyShopLoadout());
     // Heavy corridor decode after the first frame is up.
     AssetLibrary.startBackgroundPrefetch();
     if (GameSettings.instance.runMode.thiefCount >= 2) {
@@ -323,6 +332,22 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (!ProgressStore.instance.tutorialSeen) {
       overlays.add('tutorial');
       pauseEngine();
+    }
+  }
+
+  /// Equip bought hearts / potion from the shop stock.
+  Future<void> _applyShopLoadout() async {
+    final load = await ProgressStore.instance.consumeLoadoutForRun(
+      maxHearts: GameConfig.maxHearts,
+    );
+    if (load.hearts > 0) hearts = load.hearts;
+    if (load.potion) hasPotion = true;
+    if (load.hearts > 0 || load.potion) {
+      final parts = <String>[
+        if (load.hearts > 0) '${load.hearts}♥',
+        if (load.potion) 'зелье',
+      ];
+      _pulseBanner('Старт: ${parts.join(' · ')}', const Color(0xFF4FC3F7));
     }
   }
 
@@ -401,7 +426,19 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
   }
 
-  double get checkpointStepMeters => GameConfig.finishCheckpointMeters;
+  double get checkpointStepMeters => GameConfig.seriesRoundMeters;
+
+  int get seriesRounds => GameSettings.instance.runMode.seriesRounds;
+
+  bool get isFinalSeriesRound => seriesRound >= seriesRounds;
+
+  /// Meters left until the next cash-out / risk gate.
+  int get metersToCheckpoint =>
+      max(0, (_nextCheckpointM - distance).ceil());
+
+  /// 0 early → 1 on final round — drives thief steal pressure.
+  double get seriesPressure =>
+      GameConfig.thiefSeriesPressure(seriesRound, seriesRounds);
 
   @override
   void update(double dt) {
@@ -626,6 +663,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
     // Crystal rivalry “win” for missions — survive isn’t possible forever.
     final won = stats.playerWins;
+    // Shop wallet: only checkpoint cash-out / series clear banks the pot.
+    // Risk further then die / thief finish / forfeit → pot burns.
+    final cashOut = finishedByChoice &&
+        !failedRun &&
+        !finishedByThiefChoice &&
+        !failedByThiefEscape;
     final records = await store.considerRecords(
       distanceMeters: distM,
       rares: rares,
@@ -638,9 +681,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       overtakes: playerOvertakes,
       raresWhileLeading: raresWhileLeading,
       won: won,
+      bankCrystals: cashOut,
       missions: _dailyMissions,
     );
     lastRunXpGain = result.xp;
+    lastRunCrystalsGain = result.crystals;
+    lastRunCrystalsBurned = !cashOut && rares > 0;
     for (final m in _dailyMissions) {
       if (result.missions.contains(m.titleRu) &&
           !_missionToasted.contains(m.id)) {
@@ -890,19 +936,23 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       final dist = sqrt(bestDistSq);
       final revenge = !lead.playerLeads;
       final bursting = isThiefBursting;
-      final radius = revenge
-          ? GameConfig.thiefRevengeMagnetRadius
-          : (bursting
-                ? GameConfig.thiefBurstMagnetRadius
-                : GameConfig.thiefMagnetRadius);
-      final pullSp = revenge
-          ? GameConfig.thiefRevengeMagnetPullSpeed
-          : (bursting
-                ? GameConfig.thiefBurstMagnetPullSpeed
-                : GameConfig.thiefMagnetPullSpeed);
-      final stealAt = revenge
-          ? GameConfig.thiefRevengeStealDist
-          : (bursting ? 26.0 : 22.0);
+      final stealPow = GameConfig.thiefStealPowerMult(seriesPressure);
+      final radius = (revenge
+              ? GameConfig.thiefRevengeMagnetRadius
+              : (bursting
+                    ? GameConfig.thiefBurstMagnetRadius
+                    : GameConfig.thiefMagnetRadius)) *
+          stealPow;
+      final pullSp = (revenge
+              ? GameConfig.thiefRevengeMagnetPullSpeed
+              : (bursting
+                    ? GameConfig.thiefBurstMagnetPullSpeed
+                    : GameConfig.thiefMagnetPullSpeed)) *
+          stealPow;
+      final stealAt = (revenge
+              ? GameConfig.thiefRevengeStealDist
+              : (bursting ? 26.0 : 22.0)) *
+          (0.92 + 0.16 * seriesPressure);
 
       // Standing items use feet Y; jewels still need a vertical window vs thief.
       final itemY = item.standsOnGround ? item.hitY : item.position.y;
@@ -1284,7 +1334,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (finished || inChaseIntro || isThiefBursting) return;
     if (_thiefBurstCooldown > 0) return;
     _thiefBurstTimer = GameConfig.thiefBurstDuration;
-    _thiefBurstCooldown = GameConfig.thiefBurstCooldown;
+    _thiefBurstCooldown = GameConfig.thiefBurstCooldownAt(seriesPressure);
     _scheduleNextBurst();
     // Small seed only — burst should feel like a push, not a teleport.
     if (_leadDebt < 0.6 && lead.playerLeads) {
@@ -1825,11 +1875,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   /// Emotional results copy.
   String get finishHeadline {
     if (failedByThiefEscape) return 'ВОР УШЁЛ!';
-    if (finishedByThiefChoice) return 'ВОР НАЖАЛ ФИНИШ!';
+    if (finishedByThiefChoice) return 'ВОР ЗАКРЫЛ СЕРИЮ!';
     if (failedRun) {
       return failedBySpikes ? 'УМЕР ОТ ШИПОВ!' : 'УПАЛ В ЯМУ!';
     }
-    if (finishedByChoice && stats.playerWins) return 'ПОБЕДА!';
+    if (finishedByChoice && finishedSeriesComplete) return 'СЕРИЯ ПРОЙДЕНА!';
+    if (finishedByChoice && stats.playerWins) return 'ЗАБРАЛ КАМНИ!';
     if (stats.playerWins) return 'КРИСТАЛЛЫ ТВОИ!';
     return 'ВОР ЗАБРАЛ БОЛЬШЕ!';
   }
@@ -1838,19 +1889,23 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     final you = stats.player.rareTotal;
     final thief = stats.thief.rareTotal;
     final meters = distance.round();
+    final roundLabel = 'раунд $seriesRound/$seriesRounds';
     if (failedByThiefEscape) {
       return 'Догоняй, пока его видно — $meters м';
     }
     if (finishedByThiefChoice) {
-      return 'У вора больше кристаллов · $you–$thief · $meters м';
+      return 'У вора больше · $you–$thief · $roundLabel';
     }
     if (failedRun) {
       return failedBySpikes
           ? 'Сердце спасает от шипов — $meters м'
           : 'Сердце спасает от ямы — $meters м';
     }
+    if (finishedByChoice && finishedSeriesComplete) {
+      return 'Все $seriesRounds раундов · $you–$thief · $meters м';
+    }
     if (finishedByChoice && stats.playerWins) {
-      return 'Забрал победу · $you–$thief · $meters м';
+      return 'Досрочно · $you–$thief · $roundLabel';
     }
     if (stats.playerWins) {
       return 'Кристаллы $you–$thief · $meters м';
@@ -1858,7 +1913,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     return 'Кристаллы $you–$thief · $meters м';
   }
 
-  /// Every [GameConfig.finishCheckpointMeters]: cash out or risk; thief claims if ahead.
+  /// End of each series round: cash out, risk next, or thief closes the series.
   void _updateFinishCheckpoints() {
     if (finished ||
         _finishBeat ||
@@ -1880,28 +1935,45 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       return;
     }
 
+    // Final round while leading/tied — series cleared.
+    if (isFinalSeriesRound && stats.playerWins) {
+      _checkpointOpen = false;
+      finishedSeriesComplete = true;
+      audio.play('combo');
+      _pulseBanner('Серия пройдена!', const Color(0xFF81C784));
+      endRunEarly(asVictory: true);
+      return;
+    }
+
     audio.play('combo');
     overlays.add('checkpoint');
   }
 
-  /// Player takes crystals at the checkpoint (must lead).
+  /// Player cashes out the series at the checkpoint (must lead or tie).
   void acceptCheckpointFinish() {
     if (!_checkpointOpen || finished || !stats.playerWins) return;
     overlays.remove('checkpoint');
     _checkpointOpen = false;
+    finishedSeriesComplete = isFinalSeriesRound;
     audio.play('combo');
-    _pulseBanner('Финиш!', const Color(0xFF81C784));
+    _pulseBanner(
+      finishedSeriesComplete ? 'Серия пройдена!' : 'Забрал камни!',
+      const Color(0xFF81C784),
+    );
     endRunEarly(asVictory: true);
   }
 
-  /// Skip cash-out; next gate in another 700 m — thief may finish if he leads there.
+  /// Risk the next round — thief may close the series if he leads there.
   void riskCheckpointContinue() {
-    if (!_checkpointOpen || finished) return;
+    if (!_checkpointOpen || finished || isFinalSeriesRound) return;
     overlays.remove('checkpoint');
     _checkpointOpen = false;
-    _nextCheckpointM += GameConfig.finishCheckpointMeters;
-    final next = _nextCheckpointM.round();
-    _pulseBanner('Риск! След. $next м', const Color(0xFFFFB300));
+    seriesRound += 1;
+    _nextCheckpointM += GameConfig.seriesRoundMeters;
+    _pulseBanner(
+      'Раунд $seriesRound/$seriesRounds',
+      const Color(0xFFFFB300),
+    );
     if (!finished && !_pitSucking) {
       resumeEngine();
     }
@@ -1915,6 +1987,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     failedBySpikes = false;
     finishedByChoice = false;
     finishedByThiefChoice = true;
+    finishedSeriesComplete = false;
     _checkpointOpen = false;
     _thiefEscapeTimer = 0;
     _finishBeat = false;
@@ -1924,7 +1997,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _jewelStreak = 0;
     _playRate = 1;
     audio.play('steal');
-    _pulseBanner('Вор — Финиш!', const Color(0xFFFF7043));
+    _pulseBanner('Вор закрыл серию!', const Color(0xFFFF7043));
     unawaited(_commitDailyProgress());
     pauseEngine();
     overlays.remove('checkpoint');
@@ -2092,6 +2165,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     failedBySpikes = false;
     finishedByChoice = asVictory;
     finishedByThiefChoice = false;
+    if (!asVictory) finishedSeriesComplete = false;
     _checkpointOpen = false;
     overlays.remove('checkpoint');
     _thiefEscapeTimer = 0;
@@ -2183,6 +2257,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     hasPotion = false;
     _potionBoostTimer = 0;
     _heartIFrame = 0;
+    unawaited(_applyShopLoadout());
     playerOvertakes = 0;
     thiefOvertakes = 0;
     raresWhileLeading = 0;
@@ -2209,9 +2284,13 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     failedBySpikes = false;
     finishedByChoice = false;
     finishedByThiefChoice = false;
-    _nextCheckpointM = GameConfig.finishCheckpointMeters;
+    finishedSeriesComplete = false;
+    seriesRound = 1;
+    _nextCheckpointM = GameConfig.seriesRoundMeters;
     _checkpointOpen = false;
     lastRunXpGain = 0;
+    lastRunCrystalsGain = 0;
+    lastRunCrystalsBurned = false;
     _lastGapBannerAt = 0;
     _taughtMagnet = false;
     _taughtHeart = false;

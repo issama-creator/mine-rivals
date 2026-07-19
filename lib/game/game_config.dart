@@ -32,8 +32,8 @@ class GameConfig {
   /// Hard ceiling ≈ ×2.85 start (~34 m/s world) — was uncapped ~×5+.
   static const double speedHardCapMult = 2.85;
 
-  /// HUD meters tick this fraction of world pace.
-  static const double distanceMeterRate = 0.62;
+  /// HUD meters tick this fraction of world pace (lower = longer feel per round).
+  static const double distanceMeterRate = 0.50;
 
   /// Long mode — slightly denser loot / pressure.
   static double get modeSpawnTempoMult =>
@@ -300,8 +300,24 @@ class GameConfig {
   static const double lethalComboUnlockMeters = 380;
   /// Bomb→spikes teaching combo unlock (after opening).
   static const double teachComboUnlockMeters = 200;
-  /// Every N meters: offer Finish vs Risk; if thief leads crystals he claims.
-  static const double finishCheckpointMeters = 700;
+  /// One series round → checkpoint (cash out or risk next round).
+  static const double seriesRoundMeters = 500;
+  /// Alias used by older call sites.
+  static const double finishCheckpointMeters = seriesRoundMeters;
+
+  /// 0 at round 1 → 1 on the final round (thief pressure curve).
+  static double thiefSeriesPressure(int round1Based, int seriesRounds) {
+    if (seriesRounds <= 1) return 0.35;
+    return ((round1Based - 1) / (seriesRounds - 1)).clamp(0.0, 1.0);
+  }
+
+  /// Magnet / pull mult: soft early, competitive late (not oppressive).
+  static double thiefStealPowerMult(double seriesT) =>
+      0.86 + 0.42 * seriesT.clamp(0.0, 1.0);
+
+  /// Burst cooldown shrinks slightly in later rounds.
+  static double thiefBurstCooldownAt(double seriesT) =>
+      thiefBurstCooldown * (1.0 - 0.28 * seriesT.clamp(0.0, 1.0));
   /// Rare combo: web → pit (legacy; prefer [webPitComboChanceAt]).
   static const double webPitComboChance = 0.045;
   static const double webPitComboCooldownMin = 18;

@@ -323,6 +323,9 @@ class _MetaPull extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = ProgressStore.instance;
     final xp = game.lastRunXpGain;
+    final crystals = game.lastRunCrystalsGain;
+    final burned = game.lastRunCrystalsBurned;
+    final pot = game.stats.player.rareTotal;
     final lvl = store.minerLevel;
     final into = store.minerXpIntoLevel;
     final need = store.minerXpForNextLevel;
@@ -330,7 +333,7 @@ class _MetaPull extends StatelessWidget {
     final tip = failed
         ? 'Сердце спасает · монеты догоняют вора'
         : (win
-            ? 'Веди по кристаллам — забери на 700 м'
+            ? 'Забери банк на чекпоинте — или рискни'
             : 'Собери больше камней, чем вор');
 
     return DecoratedBox(
@@ -356,6 +359,29 @@ class _MetaPull extends StatelessWidget {
                 fontSize: 13,
               ),
             ),
+            if (crystals > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                '+$crystals ◆ в магазин · всего ${store.crystalBalance}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF4FC3F7),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+            ] else if (burned) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Банк $pot ◆ сгорел — не забрал на чекпоинте',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFFFF7043),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+            ],
             const SizedBox(height: 6),
             Text(
               tip,

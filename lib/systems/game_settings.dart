@@ -13,23 +13,36 @@ class GameSettings {
   /// Selected miner skin id — see [PlayerSkins].
   String selectedSkinId = 'player';
 
-  /// Endless rivalry — mode picks thief count / pressure, not run length.
+  /// Series rivalry — mode picks round count + thief pressure.
   RunMode runMode = RunMode.standard;
 }
 
 enum RunMode {
-  standard(thiefCount: 1, titleRu: 'Стандарт', blurbRu: '1 вор'),
-  long(thiefCount: 2, titleRu: 'Долгий', blurbRu: '2 вора');
+  standard(
+    thiefCount: 1,
+    seriesRounds: 5,
+    titleRu: 'Стандарт',
+    blurbRu: '5 раундов · 1 вор',
+  ),
+  long(
+    thiefCount: 2,
+    seriesRounds: 10,
+    titleRu: 'Хардкор',
+    blurbRu: '10 раундов · 2 вора',
+  );
 
   const RunMode({
     required this.thiefCount,
+    required this.seriesRounds,
     required this.titleRu,
     required this.blurbRu,
   });
 
   final int thiefCount;
+  final int seriesRounds;
   final String titleRu;
   final String blurbRu;
 
   bool get isLong => this == RunMode.long;
+  bool get isHardcore => this == RunMode.long;
 }

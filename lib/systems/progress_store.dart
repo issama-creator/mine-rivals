@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/player_skins.dart';
 import 'game_settings.dart';
+import 'shop_catalog.dart';
 
 /// Persisted unlocks, daily mission state, and settings.
 class ProgressStore {
@@ -33,6 +34,9 @@ class ProgressStore {
   static const _kMinerXp = 'miner_xp';
   static const _kWeekBestDist = 'week_best_distance_m';
   static const _kTotalRuns = 'total_runs';
+  static const _kCrystals = 'crystal_wallet';
+  static const _kStockHearts = 'stock_hearts';
+  static const _kStockPotions = 'stock_potions';
 
   SharedPreferences? _prefs;
 
@@ -76,6 +80,12 @@ class ProgressStore {
   bool weeklyDone = false;
   int weekBestDistanceMeters = 0;
 
+  /// Spendable crystals banked from runs (shop currency).
+  int crystalBalance = 0;
+  /// Consumables for the next run(s).
+  int stockHearts = 0;
+  int stockPotions = 0;
+
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
     final p = _prefs!;
@@ -103,6 +113,16 @@ class ProgressStore {
     totalWins = p.getInt(_kTotalWins) ?? 0;
     totalRuns = p.getInt(_kTotalRuns) ?? 0;
     minerXp = p.getInt(_kMinerXp) ?? 0;
+
+    if (!p.containsKey(_kCrystals)) {
+      crystalBalance = ShopCatalog.starterCrystals;
+      await p.setInt(_kCrystals, crystalBalance);
+    } else {
+      crystalBalance = p.getInt(_kCrystals) ?? 0;
+    }
+    stockHearts = (p.getInt(_kStockHearts) ?? 0).clamp(0, ShopCatalog.maxStockHearts);
+    stockPotions =
+        (p.getInt(_kStockPotions) ?? 0).clamp(0, ShopCatalog.maxStockPotions);
 
     unlockedSkins
       ..clear()
@@ -304,6 +324,68 @@ class ProgressStore {
     await _prefs?.setString(_kSkin, id);
   }
 
+  Future<void> _saveWallet() async {
+    final p = _prefs;
+    if (p == null) return;
+    await p.setInt(_kCrystals, crystalBalance);
+    await p.setInt(_kStockHearts, stockHearts);
+    await p.setInt(_kStockPotions, stockPotions);
+  }
+
+  /// Bank crystals only on cash-out (checkpoint / series clear). Risk loss = 0.
+  Future<int> bankRunCrystals({
+    required int rares,
+    required bool cashOut,
+  }) async {
+    if (!cashOut || rares <= 0) return 0;
+    crystalBalance += rares;
+    await _saveWallet();
+    return rares;
+  }
+
+  Future<bool> buyHeart() async {
+    if (crystalBalance < ShopCatalog.heartPrice) return false;
+    if (stockHearts >= ShopCatalog.maxStockHearts) return false;
+    crystalBalance -= ShopCatalog.heartPrice;
+    stockHearts += 1;
+    await _saveWallet();
+    return true;
+  }
+
+  Future<bool> buyPotion() async {
+    if (crystalBalance < ShopCatalog.potionPrice) return false;
+    if (stockPotions >= ShopCatalog.maxStockPotions) return false;
+    crystalBalance -= ShopCatalog.potionPrice;
+    stockPotions += 1;
+    await _saveWallet();
+    return true;
+  }
+
+  Future<bool> buySkin(String id) async {
+    final price = ShopCatalog.skinPrice(id);
+    if (price == null) return false;
+    if (isSkinUnlocked(id)) return false;
+    if (crystalBalance < price) return false;
+    crystalBalance -= price;
+    unlockedSkins.add(id);
+    await _saveUnlocks();
+    await _saveWallet();
+    await selectSkin(id);
+    return true;
+  }
+
+  /// Apply bought helpers at run start. Returns what was equipped.
+  Future<({int hearts, bool potion})> consumeLoadoutForRun({
+    required int maxHearts,
+  }) async {
+    final h = stockHearts.clamp(0, maxHearts);
+    final potion = stockPotions > 0;
+    if (h > 0) stockHearts -= h;
+    if (potion) stockPotions -= 1;
+    if (h > 0 || potion) await _saveWallet();
+    return (hearts: h, potion: potion);
+  }
+
   Future<void> saveSettings() async {
     final p = _prefs;
     if (p == null) return;
@@ -393,14 +475,22 @@ class ProgressStore {
   }
 
   /// Apply run stats. Returns newly completed mission titles + new skin names.
-  Future<({List<String> missions, List<String> skins, bool weekly, int xp})>
-      applyRunProgress({
+  Future<
+      ({
+        List<String> missions,
+        List<String> skins,
+        bool weekly,
+        int xp,
+        int crystals,
+      })> applyRunProgress({
     required double distance,
     required int gold,
     required int rares,
     required int overtakes,
     required int raresWhileLeading,
     required bool won,
+    /// Only true when player cashed out at a checkpoint / cleared the series.
+    required bool bankCrystals,
     required List<DailyMissionDef> missions,
   }) async {
     _rollDayIfNeeded();
@@ -484,7 +574,18 @@ class ProgressStore {
       skins.addAll(await _tryUnlockFromWeekly());
     }
 
-    return (missions: newly, skins: skins, weekly: weeklyJust, xp: xpGain);
+    final crystals = await bankRunCrystals(
+      rares: rares,
+      cashOut: bankCrystals,
+    );
+
+    return (
+      missions: newly,
+      skins: skins,
+      weekly: weeklyJust,
+      xp: xpGain,
+      crystals: crystals,
+    );
   }
 
   /// Live peek during a run (no persist).

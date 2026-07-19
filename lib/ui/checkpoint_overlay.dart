@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../game/mine_rivals_game.dart';
 
-/// Every 700 m: cash out crystals or risk the next segment (thief may finish).
+/// End of a series round: cash out crystal pot or risk — lose pot on failure.
 class CheckpointOverlay extends StatelessWidget {
   const CheckpointOverlay({super.key, required this.game});
 
@@ -13,9 +13,12 @@ class CheckpointOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final you = game.stats.player.rareTotal;
     final thief = game.stats.thief.rareTotal;
-    final meters = game.distance.round();
+    final round = game.seriesRound;
+    final total = game.seriesRounds;
+    final stepM = game.checkpointStepMeters.round();
     final youLead = you > thief;
     final tied = you == thief;
+    final canRisk = !game.isFinalSeriesRound;
 
     return Material(
       color: Colors.black.withValues(alpha: 0.78),
@@ -44,40 +47,69 @@ class CheckpointOverlay extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '$meters М',
+                        'РАУНД $round / $total · $stepM М',
                         style: TextStyle(
                           color: const Color(0xFFFFCA28).withValues(alpha: 0.9),
                           fontWeight: FontWeight.w900,
                           fontSize: 13,
-                          letterSpacing: 2,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      const Text(
-                        'ЗАБРАТЬ КАМНИ?',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xFFFFE082),
-                          fontWeight: FontWeight.w900,
-                          fontSize: 26,
+                          letterSpacing: 1.2,
                         ),
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Ты $you · Вор $thief',
+                        canRisk ? 'ЗАБРАТЬ ИЛИ РИСК?' : 'ФИНАЛ СЕРИИ',
+                        textAlign: TextAlign.center,
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFFFFE082),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 24,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          color: const Color(0xFF0277BD).withValues(alpha: 0.28),
+                          border: Border.all(
+                            color: const Color(0xFF4FC3F7).withValues(alpha: 0.55),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          child: Text(
+                            'Банк забега: $you ◆',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFFE1F5FE),
+                              fontWeight: FontWeight.w900,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Ты $you · Вор $thief',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
                           fontWeight: FontWeight.w800,
-                          fontSize: 18,
+                          fontSize: 15,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         youLead
-                            ? 'Ты впереди — забери победу или рискни ещё ${game.checkpointStepMeters.round()} м. Если у вора станет больше — он нажмёт Финиш.'
+                            ? (canRisk
+                                ? 'Забери $you ◆ в магазин сейчас — или рискни раунд ${round + 1}/$total. Умрёшь или вор закроет серию — весь банк сгорит.'
+                                : 'Последний раунд. Забери $you ◆ в магазин — серия пройдена!')
                             : (tied
-                                ? 'Ничья. Рискни дальше или беги — победит тот, у кого больше на следующем чекпоинте.'
-                                : 'Вор ведёт! Если рискнёшь и не обгонишь по камням — он заберёт Финиш.'),
+                                ? (canRisk
+                                    ? 'Ничья. Рискни дальше — при проигрыше банк ($you ◆) сгорит.'
+                                    : 'Ничья на финале — можно забрать $you ◆.')
+                                : 'Вор ведёт. Беги дальше — если не обгонишь, банк сгорит.'),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.75),
@@ -87,25 +119,30 @@ class CheckpointOverlay extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      if (youLead) ...[
+                      if (youLead || (tied && !canRisk)) ...[
                         _btn(
-                          label: 'ФИНИШ — ЗАБРАТЬ',
+                          label: canRisk
+                              ? 'ЗАБРАТЬ $you ◆'
+                              : 'ЗАБРАТЬ $you ◆ — СЕРИЯ',
                           color: const Color(0xFF66BB6A),
                           onTap: () {
                             HapticFeedback.mediumImpact();
                             game.acceptCheckpointFinish();
                           },
                         ),
-                        const SizedBox(height: 10),
+                        if (canRisk) const SizedBox(height: 10),
                       ],
-                      _btn(
-                        label: youLead ? 'РИСКНУТЬ ДАЛЬШЕ' : 'БЕГУ ДАЛЬШЕ',
-                        color: const Color(0xFFFFB300),
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          game.riskCheckpointContinue();
-                        },
-                      ),
+                      if (canRisk)
+                        _btn(
+                          label: youLead
+                              ? 'РИСКНУТЬ — БАНК ГОРИТ ПРИ ПРОИГРЫШЕ'
+                              : 'БЕГУ ДАЛЬШЕ',
+                          color: const Color(0xFFFFB300),
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            game.riskCheckpointContinue();
+                          },
+                        ),
                     ],
                   ),
                 ),
@@ -136,7 +173,8 @@ class CheckpointOverlay extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
         ),
       ),
     );

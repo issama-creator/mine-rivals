@@ -8,10 +8,12 @@ import '../game/mine_rivals_game.dart';
 import '../game/player_skins.dart';
 import '../systems/game_settings.dart';
 import '../systems/progress_store.dart';
+import '../systems/shop_catalog.dart';
 import '../ui/game_loading_screen.dart';
 import '../ui/hud_overlay.dart';
 import '../ui/checkpoint_overlay.dart';
 import '../ui/results_overlay.dart';
+import '../ui/shop_sheet.dart';
 import '../ui/tutorial_overlay.dart';
 
 class MenuScreen extends StatefulWidget {
@@ -86,6 +88,18 @@ class _MenuScreenState extends State<MenuScreen>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => const _SkinPickerSheet(),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _openShop() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => const ShopSheet(),
     ).then((_) {
       if (mounted) setState(() {});
     });
@@ -237,7 +251,7 @@ class _MenuScreenState extends State<MenuScreen>
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            'Больше кристаллов, чем у вора —\nзабери на чекпоинте 700 м!',
+                            'Серия раундов по 500 м —\nзабери камни или рискни дальше!',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.85),
@@ -277,6 +291,13 @@ class _MenuScreenState extends State<MenuScreen>
                             icon: Icons.play_arrow_rounded,
                             filled: true,
                             onTap: _startGame,
+                          ),
+                          const SizedBox(height: 12),
+                          _MenuButton(
+                            label: 'МАГАЗИН',
+                            icon: Icons.storefront_rounded,
+                            filled: false,
+                            onTap: _openShop,
                           ),
                           const SizedBox(height: 12),
                           _MenuButton(
@@ -872,7 +893,7 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                   Text(
                     ProgressStore.instance.isSkinUnlocked(skin.id)
                         ? skin.nameRu
-                        : '${skin.nameRu} · ${DailyMissions.unlockHint(skin.id)}',
+                        : '${skin.nameRu} · ${_skinLockHint(skin.id)}',
                     style: TextStyle(
                       color: ProgressStore.instance.isSkinUnlocked(skin.id)
                           ? skin.accent
@@ -927,6 +948,7 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                                   _pick(s);
                                 },
                                 child: Stack(
+                                  alignment: Alignment.center,
                                   children: [
                                     Column(
                                       children: [
@@ -945,7 +967,7 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                                                     .shortestSide;
                                                 return Center(
                                                   child: Opacity(
-                                                    opacity: unlocked ? 1 : 0.35,
+                                                    opacity: unlocked ? 1 : 0.28,
                                                     child: SizedBox(
                                                       width: side,
                                                       height: side,
@@ -979,14 +1001,15 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                                           child: Text(
                                             unlocked
                                                 ? s.nameRu
-                                                : DailyMissions.unlockHint(s.id),
+                                                : _skinLockHint(s.id),
                                             textAlign: TextAlign.center,
                                             style: TextStyle(
                                               color: unlocked
                                                   ? (on
                                                       ? s.accent
                                                       : Colors.white70)
-                                                  : Colors.white54,
+                                                  : const Color(0xFFFFE082)
+                                                      .withValues(alpha: 0.85),
                                               fontWeight: FontWeight.w800,
                                               fontSize: 14,
                                             ),
@@ -995,14 +1018,30 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                                       ],
                                     ),
                                     if (!unlocked)
-                                      const Positioned(
-                                        top: 12,
-                                        right: 16,
-                                        child: Icon(
-                                          Icons.lock_rounded,
-                                          color: Color(0xFFFFE082),
-                                          size: 22,
-                                        ),
+                                      Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 64,
+                                            height: 64,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: Colors.black
+                                                  .withValues(alpha: 0.62),
+                                              border: Border.all(
+                                                color: const Color(0xFFFFB300)
+                                                    .withValues(alpha: 0.85),
+                                                width: 2,
+                                              ),
+                                            ),
+                                            child: const Icon(
+                                              Icons.lock_rounded,
+                                              color: Color(0xFFFFE082),
+                                              size: 34,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 28),
+                                        ],
                                       ),
                                   ],
                                 ),
@@ -1033,7 +1072,7 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                       child: Text(
                         ProgressStore.instance.isSkinUnlocked(_selected)
                             ? 'Выбрать'
-                            : 'Закрыто',
+                            : 'Замок · купи в магазине',
                         style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 16,
@@ -1051,6 +1090,12 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
   }
 }
 
+String _skinLockHint(String skinId) {
+  final price = ShopCatalog.skinPrice(skinId);
+  if (price != null) return 'Замок · $price ◆';
+  return DailyMissions.unlockHint(skinId);
+}
+
 class _LocalRecordsStrip extends StatelessWidget {
   const _LocalRecordsStrip();
 
@@ -1061,6 +1106,7 @@ class _LocalRecordsStrip extends StatelessWidget {
     final rares = store.bestRares;
     final hook = store.comebackHook();
     final lvl = store.minerLevel;
+    final wallet = store.crystalBalance;
     final record = dist <= 0 && rares <= 0
         ? 'Рекорд появится после первого забега'
         : 'Рекорд: $dist м · $rares крист.';
@@ -1072,6 +1118,16 @@ class _LocalRecordsStrip extends StatelessWidget {
           style: TextStyle(
             color: const Color(0xFFFFCA28).withValues(alpha: 0.9),
             fontSize: 13,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Кошелёк: $wallet ◆',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: const Color(0xFF4FC3F7).withValues(alpha: 0.95),
+            fontSize: 14,
             fontWeight: FontWeight.w900,
           ),
         ),
