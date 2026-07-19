@@ -84,13 +84,15 @@ class _MenuScreenState extends State<MenuScreen>
 
   void _openSkins() {
     HapticFeedback.selectionClick();
-    showModalBottomSheet<void>(
+    showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => const _SkinPickerSheet(),
-    ).then((_) {
-      if (mounted) setState(() {});
+    ).then((result) {
+      if (!mounted) return;
+      setState(() {});
+      if (result == 'shop') _openShop();
     });
   }
 
@@ -185,8 +187,16 @@ class _MenuScreenState extends State<MenuScreen>
                   FadeTransition(
                     opacity: fade,
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _MissionSticker(onTap: _openMissions),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _PlayerMetaChip(onWalletTap: _openShop),
+                            const SizedBox(height: 8),
+                            _MissionSticker(onTap: _openMissions),
+                          ],
+                        ),
                         const Spacer(),
                         IconButton(
                           onPressed: _openSettings,
@@ -252,7 +262,7 @@ class _MenuScreenState extends State<MenuScreen>
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            'Серия раундов по 500 м —\nзабери камни или рискни дальше!',
+                            'Забери банк — или рискни\nи потеряй всё!',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.85),
@@ -819,36 +829,27 @@ class _SkinPickerSheet extends StatefulWidget {
 
 class _SkinPickerSheetState extends State<_SkinPickerSheet> {
   late String _selected;
-  late final PageController _page;
 
   @override
   void initState() {
     super.initState();
     _selected = GameSettings.instance.selectedSkinId;
-    final idx = PlayerSkins.all.indexWhere((s) => s.id == _selected);
-    _page = PageController(viewportFraction: 0.72, initialPage: idx < 0 ? 0 : idx);
-  }
-
-  @override
-  void dispose() {
-    _page.dispose();
-    super.dispose();
   }
 
   void _pick(PlayerSkin skin) {
+    HapticFeedback.selectionClick();
+    setState(() => _selected = skin.id);
     if (!ProgressStore.instance.isSkinUnlocked(skin.id)) {
       HapticFeedback.heavyImpact();
       return;
     }
-    HapticFeedback.selectionClick();
-    setState(() => _selected = skin.id);
     unawaited(ProgressStore.instance.selectSkin(skin.id));
-    // Don't decode run sheets on the menu — that froze mid-tier Android.
   }
 
   @override
   Widget build(BuildContext context) {
     final skin = PlayerSkins.byId(_selected);
+    final unlocked = ProgressStore.instance.isSkinUnlocked(skin.id);
     final h = MediaQuery.sizeOf(context).height;
 
     return Padding(
@@ -868,7 +869,7 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
         child: SafeArea(
           top: false,
           child: SizedBox(
-            height: h * 0.62,
+            height: h * 0.68,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
               child: Column(
@@ -892,160 +893,140 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    ProgressStore.instance.isSkinUnlocked(skin.id)
+                    unlocked
                         ? skin.nameRu
                         : '${skin.nameRu} · ${_skinLockHint(skin.id)}',
                     style: TextStyle(
-                      color: ProgressStore.instance.isSkinUnlocked(skin.id)
-                          ? skin.accent
-                          : Colors.white54,
+                      color: unlocked ? skin.accent : Colors.white54,
                       fontWeight: FontWeight.w700,
                       fontSize: 15,
                     ),
                   ),
                   const SizedBox(height: 12),
                   Expanded(
-                    child: PageView.builder(
-                      controller: _page,
+                    child: GridView.builder(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                        childAspectRatio: 0.82,
+                      ),
                       itemCount: PlayerSkins.all.length,
-                      onPageChanged: (i) {
-                        final s = PlayerSkins.all[i];
-                        if (ProgressStore.instance.isSkinUnlocked(s.id)) {
-                          _pick(s);
-                        } else {
-                          setState(() {});
-                        }
-                      },
                       itemBuilder: (context, i) {
                         final s = PlayerSkins.all[i];
-                        final unlocked =
+                        final open =
                             ProgressStore.instance.isSkinUnlocked(s.id);
                         final on = s.id == _selected;
-                        final borderColor = on && unlocked
+                        final borderColor = on && open
                             ? s.accent
-                            : s.accent.withValues(alpha: unlocked ? 0.35 : 0.2);
-                        return AnimatedScale(
-                          scale: on ? 1 : 0.9,
-                          duration: const Duration(milliseconds: 220),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: DecoratedBox(
+                            : s.accent.withValues(alpha: open ? 0.4 : 0.22);
+
+                        return Material(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(18),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () => _pick(s),
+                            child: Ink(
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(22),
-                                color: Colors.black.withValues(alpha: 0.35),
+                                borderRadius: BorderRadius.circular(18),
                                 border: Border.all(
                                   color: borderColor,
-                                  width: on ? 2.4 : 1.4,
+                                  width: on ? 2.2 : 1.3,
                                 ),
                               ),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(22),
-                                onTap: () {
-                                  _page.animateToPage(
-                                    i,
-                                    duration: const Duration(milliseconds: 280),
-                                    curve: Curves.easeOutCubic,
-                                  );
-                                  _pick(s);
-                                },
-                                child: Stack(
-                                  alignment: Alignment.center,
-                                  children: [
-                                    Column(
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      8,
+                                      10,
+                                      8,
+                                      8,
+                                    ),
+                                    child: Column(
                                       children: [
                                         Expanded(
-                                          child: Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                              12,
-                                              16,
-                                              12,
-                                              4,
-                                            ),
-                                            child: LayoutBuilder(
-                                              builder: (context, constraints) {
-                                                final side = constraints
-                                                    .biggest
-                                                    .shortestSide;
-                                                return Center(
-                                                  child: Opacity(
-                                                    opacity: unlocked ? 1 : 0.28,
-                                                    child: SizedBox(
-                                                      width: side,
-                                                      height: side,
-                                                      child: Image.asset(
-                                                        s.previewAsset,
-                                                        fit: BoxFit.contain,
-                                                        alignment:
-                                                            Alignment.center,
-                                                        filterQuality:
-                                                            FilterQuality.high,
-                                                        errorBuilder:
-                                                            (_, __, ___) => Icon(
-                                                          Icons.person_rounded,
-                                                          size: 96,
-                                                          color: s.accent
-                                                              .withValues(
-                                                            alpha: 0.7,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                );
-                                              },
-                                            ),
-                                          ),
-                                        ),
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(bottom: 14),
-                                          child: Text(
-                                            unlocked
-                                                ? s.nameRu
-                                                : _skinLockHint(s.id),
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              color: unlocked
-                                                  ? (on
-                                                      ? s.accent
-                                                      : Colors.white70)
-                                                  : const Color(0xFFFFE082)
-                                                      .withValues(alpha: 0.85),
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    if (!unlocked)
-                                      Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                            width: 64,
-                                            height: 64,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: Colors.black
-                                                  .withValues(alpha: 0.62),
-                                              border: Border.all(
-                                                color: const Color(0xFFFFB300)
-                                                    .withValues(alpha: 0.85),
-                                                width: 2,
+                                          child: Opacity(
+                                            opacity: open ? 1 : 0.3,
+                                            child: Image.asset(
+                                              s.previewAsset,
+                                              fit: BoxFit.contain,
+                                              filterQuality: FilterQuality.high,
+                                              errorBuilder: (_, __, ___) =>
+                                                  Icon(
+                                                Icons.person_rounded,
+                                                size: 56,
+                                                color: s.accent,
                                               ),
                                             ),
-                                            child: const Icon(
-                                              Icons.lock_rounded,
-                                              color: Color(0xFFFFE082),
-                                              size: 34,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          s.nameRu,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: open
+                                                ? (on
+                                                    ? s.accent
+                                                    : Colors.white70)
+                                                : Colors.white54,
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        if (!open)
+                                          Text(
+                                            _skinLockHint(s.id),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: const Color(0xFFFFE082)
+                                                  .withValues(alpha: 0.8),
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 10,
                                             ),
                                           ),
-                                          const SizedBox(height: 28),
-                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  if (!open)
+                                    const Icon(
+                                      Icons.lock_rounded,
+                                      color: Color(0xFFFFE082),
+                                      size: 28,
+                                    ),
+                                  if (on && open)
+                                    Positioned(
+                                      top: 8,
+                                      right: 8,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: s.accent,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: const Text(
+                                          'ON',
+                                          style: TextStyle(
+                                            color: Color(0xFF1A100A),
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 10,
+                                          ),
+                                        ),
                                       ),
-                                  ],
-                                ),
+                                    ),
+                                ],
                               ),
                             ),
                           ),
@@ -1058,22 +1039,23 @@ class _SkinPickerSheetState extends State<_SkinPickerSheet> {
                     width: double.infinity,
                     height: 50,
                     child: FilledButton(
-                      onPressed: ProgressStore.instance
-                              .isSkinUnlocked(_selected)
-                          ? () => Navigator.pop(context)
-                          : null,
+                      onPressed: () => Navigator.pop(
+                        context,
+                        unlocked ? null : 'shop',
+                      ),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFB300),
-                        foregroundColor: const Color(0xFF3E2723),
-                        disabledBackgroundColor: Colors.white12,
+                        backgroundColor: unlocked
+                            ? const Color(0xFFFFB300)
+                            : const Color(0xFF4FC3F7),
+                        foregroundColor: unlocked
+                            ? const Color(0xFF3E2723)
+                            : const Color(0xFF0D47A1),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
                       ),
                       child: Text(
-                        ProgressStore.instance.isSkinUnlocked(_selected)
-                            ? 'Выбрать'
-                            : 'Замок · купи в магазине',
+                        unlocked ? 'Готово' : 'В магазин',
                         style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 16,
@@ -1097,6 +1079,98 @@ String _skinLockHint(String skinId) {
   return DailyMissions.unlockHint(skinId);
 }
 
+/// Top-left: level + wallet (tap wallet → shop).
+class _PlayerMetaChip extends StatelessWidget {
+  const _PlayerMetaChip({required this.onWalletTap});
+
+  final VoidCallback onWalletTap;
+
+  static const _gemAsset = 'assets/images/kristales/crops/c1_0.png';
+
+  @override
+  Widget build(BuildContext context) {
+    final store = ProgressStore.instance;
+    final lvl = store.minerLevel;
+    final wallet = store.crystalBalance;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Ур. $lvl · ${store.minerTitle}',
+          style: TextStyle(
+            color: const Color(0xFFFFCA28).withValues(alpha: 0.95),
+            fontSize: 13,
+            fontWeight: FontWeight.w900,
+            shadows: const [
+              Shadow(color: Colors.black87, blurRadius: 6),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onWalletTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFF0277BD).withValues(alpha: 0.42),
+                    Colors.black.withValues(alpha: 0.45),
+                  ],
+                ),
+                border: Border.all(
+                  color: const Color(0xFF4FC3F7).withValues(alpha: 0.7),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.asset(
+                      _gemAsset,
+                      width: 20,
+                      height: 20,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.diamond_rounded,
+                        size: 18,
+                        color: Color(0xFF4FC3F7),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      '$wallet',
+                      style: const TextStyle(
+                        color: Color(0xFFE1F5FE),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'кошелёк',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.55),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _LocalRecordsStrip extends StatelessWidget {
   const _LocalRecordsStrip();
 
@@ -1105,54 +1179,17 @@ class _LocalRecordsStrip extends StatelessWidget {
     final store = ProgressStore.instance;
     final dist = store.bestDistanceMeters;
     final rares = store.bestRares;
-    final hook = store.comebackHook();
-    final lvl = store.minerLevel;
-    final wallet = store.crystalBalance;
     final record = dist <= 0 && rares <= 0
         ? 'Рекорд появится после первого забега'
         : 'Рекорд: $dist м · $rares крист.';
-    return Column(
-      children: [
-        Text(
-          'Ур. $lvl · ${store.minerTitle}',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: const Color(0xFFFFCA28).withValues(alpha: 0.9),
-            fontSize: 13,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Кошелёк: $wallet ◆',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: const Color(0xFF4FC3F7).withValues(alpha: 0.95),
-            fontSize: 14,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          record,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: const Color(0xFFFFE082).withValues(alpha: 0.85),
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          hook,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: const Color(0xFF81C784).withValues(alpha: 0.9),
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
+    return Text(
+      record,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: const Color(0xFFFFE082).withValues(alpha: 0.85),
+        fontSize: 14,
+        fontWeight: FontWeight.w800,
+      ),
     );
   }
 }

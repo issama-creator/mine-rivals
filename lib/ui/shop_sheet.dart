@@ -19,41 +19,166 @@ class ShopSheet extends StatefulWidget {
 class _ShopSheetState extends State<ShopSheet> {
   int _tab = 0; // 0 helpers, 1 skins
   String? _toast;
+  bool _toastOk = true;
 
   static const _gemAsset = 'assets/images/kristales/crops/c1_0.png';
 
   ProgressStore get _store => ProgressStore.instance;
 
-  void _flash(String msg) {
-    setState(() => _toast = msg);
+  void _flash(String msg, {bool ok = true}) {
+    setState(() {
+      _toast = msg;
+      _toastOk = ok;
+    });
     Future<void>.delayed(const Duration(milliseconds: 1400), () {
       if (mounted && _toast == msg) setState(() => _toast = null);
     });
   }
 
-  Future<void> _buyHeart() async {
-    final ok = await _store.buyHeart();
+  Future<bool> _confirmBuy({
+    required String title,
+    required int price,
+  }) async {
     HapticFeedback.selectionClick();
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.72),
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF2A1A12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: BorderSide(
+              color: const Color(0xFFFFB300).withValues(alpha: 0.7),
+            ),
+          ),
+          title: const Text(
+            'Точно хотите купить?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFFFFE082),
+              fontWeight: FontWeight.w900,
+              fontSize: 20,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Списать $price ◆?',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: const Color(0xFF4FC3F7).withValues(alpha: 0.95),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          actions: [
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.25),
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text(
+                      'Нет',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF66BB6A),
+                      foregroundColor: const Color(0xFF1B5E20),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text(
+                      'Да, купить',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+    return ok == true;
+  }
+
+  Future<void> _buyHeart() async {
+    if (_store.stockHearts >= ShopCatalog.maxStockHearts) {
+      _flash('Запас сердец полон', ok: false);
+      return;
+    }
+    if (_store.crystalBalance < ShopCatalog.heartPrice) {
+      _flash('Мало кристаллов', ok: false);
+      return;
+    }
+    final yes = await _confirmBuy(
+      title: 'Сердце',
+      price: ShopCatalog.heartPrice,
+    );
+    if (!yes || !mounted) return;
+    final ok = await _store.buyHeart();
+    HapticFeedback.mediumImpact();
     setState(() {});
     _flash(
-      ok
-          ? 'Сердце в запасе (${_store.stockHearts})'
-          : (_store.stockHearts >= ShopCatalog.maxStockHearts
-              ? 'Запас сердец полон'
-              : 'Мало кристаллов'),
+      ok ? 'Сердце в запасе (${_store.stockHearts})' : 'Мало кристаллов',
+      ok: ok,
     );
   }
 
   Future<void> _buyPotion() async {
+    if (_store.stockPotions >= ShopCatalog.maxStockPotions) {
+      _flash('Запас зелий полон', ok: false);
+      return;
+    }
+    if (_store.crystalBalance < ShopCatalog.potionPrice) {
+      _flash('Мало кристаллов', ok: false);
+      return;
+    }
+    final yes = await _confirmBuy(
+      title: 'Зелье рывка',
+      price: ShopCatalog.potionPrice,
+    );
+    if (!yes || !mounted) return;
     final ok = await _store.buyPotion();
-    HapticFeedback.selectionClick();
+    HapticFeedback.mediumImpact();
     setState(() {});
     _flash(
-      ok
-          ? 'Зелье в запасе (${_store.stockPotions})'
-          : (_store.stockPotions >= ShopCatalog.maxStockPotions
-              ? 'Запас зелий полон'
-              : 'Мало кристаллов'),
+      ok ? 'Зелье в запасе (${_store.stockPotions})' : 'Мало кристаллов',
+      ok: ok,
     );
   }
 
@@ -67,10 +192,19 @@ class _ShopSheetState extends State<ShopSheet> {
       _flash('Выбран: ${skin.nameRu}');
       return;
     }
+    if (_store.crystalBalance < price) {
+      _flash('Мало кристаллов', ok: false);
+      return;
+    }
+    final yes = await _confirmBuy(
+      title: 'Скин «${skin.nameRu}»',
+      price: price,
+    );
+    if (!yes || !mounted) return;
     final ok = await _store.buySkin(skin.id);
     HapticFeedback.mediumImpact();
     setState(() {});
-    _flash(ok ? 'Куплено: ${skin.nameRu}!' : 'Мало кристаллов');
+    _flash(ok ? 'Куплено: ${skin.nameRu}!' : 'Мало кристаллов', ok: ok);
   }
 
   @override
@@ -149,8 +283,10 @@ class _ShopSheetState extends State<ShopSheet> {
                           padding: const EdgeInsets.only(top: 6, bottom: 2),
                           child: Text(
                             _toast!,
-                            style: const TextStyle(
-                              color: Color(0xFF81C784),
+                            style: TextStyle(
+                              color: _toastOk
+                                  ? const Color(0xFF81C784)
+                                  : const Color(0xFFEF5350),
                               fontWeight: FontWeight.w800,
                               fontSize: 13,
                             ),
@@ -187,35 +323,35 @@ class _ShopSheetState extends State<ShopSheet> {
                             crossAxisCount: 2,
                             mainAxisSpacing: 10,
                             crossAxisSpacing: 10,
-                            childAspectRatio: 0.82,
+                            childAspectRatio: 0.74,
                             children: [
                               _ShopCard(
                                 accent: const Color(0xFFEF5350),
                                 title: 'Сердце',
-                                subtitle:
+                                subtitle: 'Щит от ямы и шипов',
+                                stock:
                                     '${_store.stockHearts}/${ShopCatalog.maxStockHearts}',
                                 price: ShopCatalog.heartPrice,
                                 canAfford: bal >= ShopCatalog.heartPrice,
-                                gemAsset: _gemAsset,
                                 onTap: _buyHeart,
                                 art: const Icon(
                                   Icons.favorite_rounded,
-                                  size: 56,
+                                  size: 52,
                                   color: Color(0xFFEF5350),
                                 ),
                               ),
                               _ShopCard(
                                 accent: const Color(0xFFAB47BC),
                                 title: 'Зелье',
-                                subtitle:
+                                subtitle: 'Рывок — догони вора',
+                                stock:
                                     '${_store.stockPotions}/${ShopCatalog.maxStockPotions}',
                                 price: ShopCatalog.potionPrice,
                                 canAfford: bal >= ShopCatalog.potionPrice,
-                                gemAsset: _gemAsset,
                                 onTap: _buyPotion,
                                 art: const Icon(
                                   Icons.science_rounded,
-                                  size: 56,
+                                  size: 52,
                                   color: Color(0xFFCE93D8),
                                 ),
                               ),
@@ -242,12 +378,11 @@ class _ShopSheetState extends State<ShopSheet> {
                                 title: skin.nameRu,
                                 subtitle: owned
                                     ? (selected ? 'Выбран' : 'Куплен')
-                                    : 'Скин',
+                                    : 'Внешний вид',
                                 price: price,
                                 canAfford: bal >= price,
                                 owned: owned,
                                 selected: selected,
-                                gemAsset: _gemAsset,
                                 onTap: () => _buySkin(skin),
                                 art: Image.asset(
                                   skin.previewAsset,
@@ -392,9 +527,9 @@ class _ShopCard extends StatelessWidget {
     required this.subtitle,
     required this.price,
     required this.canAfford,
-    required this.gemAsset,
     required this.onTap,
     required this.art,
+    this.stock,
     this.owned = false,
     this.selected = false,
   });
@@ -402,11 +537,11 @@ class _ShopCard extends StatelessWidget {
   final Color accent;
   final String title;
   final String subtitle;
+  final String? stock;
   final int price;
   final bool canAfford;
   final bool owned;
   final bool selected;
-  final String gemAsset;
   final VoidCallback onTap;
   final Widget art;
 
@@ -511,16 +646,31 @@ class _ShopCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.5),
+                    color: Colors.white.withValues(alpha: 0.72),
                     fontWeight: FontWeight.w700,
                     fontSize: 11,
+                    height: 1.2,
                   ),
                 ),
+                if (stock != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'запас $stock',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.4),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Container(
                   width: double.infinity,
-                  height: 36,
+                  height: 38,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
                     gradient: LinearGradient(
@@ -531,36 +681,20 @@ class _ShopCard extends StatelessWidget {
                               : [Colors.white24, Colors.white12],
                     ),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (!owned) ...[
-                        Image.asset(
-                          gemAsset,
-                          width: 16,
-                          height: 16,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Icon(
-                            Icons.diamond_rounded,
-                            size: 14,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                      ],
-                      Text(
-                        owned
-                            ? (selected ? 'ВЫБРАН' : 'КУПЛЕН')
-                            : '$price',
-                        style: TextStyle(
-                          color: owned || canAfford
-                              ? Colors.white
-                              : Colors.white54,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
+                  alignment: Alignment.center,
+                  child: Text(
+                    owned
+                        ? (selected ? 'ВЫБРАН' : 'КУПЛЕН')
+                        : 'КУПИТЬ · $price ◆',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: owned || canAfford
+                          ? Colors.white
+                          : Colors.white54,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                      letterSpacing: 0.2,
+                    ),
                   ),
                 ),
               ],
