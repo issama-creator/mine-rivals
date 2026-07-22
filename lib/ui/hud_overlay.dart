@@ -21,8 +21,8 @@ class HudOverlay extends StatefulWidget {
 class _HudOverlayState extends State<HudOverlay> {
   Timer? _timer;
 
-  static const _gemYou = 'assets/images/kristales/crops/c1_0.png';
-  static const _gemThief = 'assets/images/kristales/crops/c1_1.png';
+  static const _gemYou = 'assets/images/items/diamond.png';
+  static const _gemThief = 'assets/images/items/diamond.png';
 
   int _lastYou = -1;
   int _lastThief = -1;

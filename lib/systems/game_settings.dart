@@ -20,15 +20,15 @@ class GameSettings {
 enum RunMode {
   standard(
     thiefCount: 1,
-    seriesRounds: 5,
+    seriesRounds: 10, // 10 × 500 м = 5 км
     titleRu: 'Стандарт',
-    blurbRu: '5 раундов · 1 вор',
+    blurbRu: '5 км · 1 вор',
   ),
   long(
     thiefCount: 2,
-    seriesRounds: 10,
+    seriesRounds: 20, // 20 × 500 м = 10 км
     titleRu: 'Хардкор',
-    blurbRu: '10 раундов · 2 вора',
+    blurbRu: '10 км · 2 вора',
   );
 
   const RunMode({
@@ -42,6 +42,9 @@ enum RunMode {
   final int seriesRounds;
   final String titleRu;
   final String blurbRu;
+
+  /// Target run length in meters (seriesRounds × 500 м).
+  double get targetMeters => seriesRounds * 500.0;
 
   bool get isLong => this == RunMode.long;
   bool get isHardcore => this == RunMode.long;

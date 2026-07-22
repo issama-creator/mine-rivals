@@ -13,10 +13,11 @@ enum ItemMagnet { none, player, thief }
 
 Vector2 _displaySizeFor(ItemType type) {
   if (type.isJewel) {
-    final side = type == ItemType.legendary
+    // Universal diamond PNG ~316×395 — keep aspect so it doesn't squash.
+    final h = type == ItemType.legendary
         ? GameConfig.jewelDisplaySize * 1.12
         : GameConfig.jewelDisplaySize;
-    return Vector2.all(side);
+    return Vector2(h * (316 / 395), h);
   }
   if (type.isDynamiteCart) {
     // Crop is ~320×298 — keep aspect so wheels don't squash.
@@ -58,6 +59,8 @@ class FallingItem extends SpriteComponent {
   ItemMagnet magnetBy = ItemMagnet.none;
   double life = 0;
   double _pulse = Random().nextDouble() * pi * 2;
+  /// Slow Subway-style tumble for jewels (radians).
+  double _jewelSpin = Random().nextDouble() * pi * 2;
   MineRivalsGame? _game;
   GroundShadow? _groundShadow;
   final Paint _glowPaint = Paint();
@@ -89,6 +92,12 @@ class FallingItem extends SpriteComponent {
   final Paint _potionGlass = Paint()..color = const Color(0xFF8E24AA);
   final Paint _potionNeck = Paint()..color = const Color(0xFFCE93D8);
   final Paint _potionCork = Paint()..color = const Color(0xFFFFD54F);
+  /// 0–1 danger warning as the hazard approaches the catch line.
+  double telegraph = 0;
+  final Paint _telePaint = Paint();
+  final Paint _teleRing = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.4;
   double _pitShaderW = -1;
   double _pitShaderH = -1;
 
@@ -113,7 +122,9 @@ class FallingItem extends SpriteComponent {
     life = 0;
     position.setFrom(newPosition);
     fallSpeed = newSpeed;
+    telegraph = 0;
     _pulse = Random().nextDouble() * pi * 2;
+    _jewelSpin = Random().nextDouble() * pi * 2;
     // Corridor may have swapped jewel art since this instance was pooled.
     sprite = _spriteForType(type);
     size = _displaySizeFor(type);
@@ -238,22 +249,96 @@ class FallingItem extends SpriteComponent {
     } else {
       position.y += worldSpeed * 0.35 * dt;
     }
-    _pulse += dt * (type.isBomb
-        ? 0.22
-        : (type.isExplosive || type.isSpikes ? 0.85 : 4));
+    _updateTelegraph(worldSpeed);
+    if (type.isJewel) {
+      // Slow Subway-style tumble (~0.28 rev/s).
+      _jewelSpin += dt * 1.75;
+      _pulse += dt * 2.0;
+    } else {
+      _pulse += dt * (type.isBomb
+          ? 0.22
+          : (type.isExplosive || type.isSpikes || type.isHazard ? 2.8 : 4));
+    }
+  }
+
+  /// ETA to player catch line → readable “danger incoming” window.
+  void _updateTelegraph(double scrollSpeed) {
+    if (!type.isHazard || collected || stolen) {
+      telegraph = 0;
+      return;
+    }
+    final game = _game;
+    if (game == null || scrollSpeed < 8) {
+      telegraph = 0;
+      return;
+    }
+    // Catch roughly at the miner’s feet / basket band.
+    final catchY = game.player.position.y - (type.isLethalFloor ? 10 : 28);
+    final dy = catchY - hitY;
+    if (dy <= 0) {
+      telegraph = 0;
+      return;
+    }
+    final eta = dy / scrollSpeed;
+    final start = GameConfig.hazardTelegraphStartSec;
+    if (eta > start || eta < 0.04) {
+      telegraph = 0;
+      return;
+    }
+    // Ramps up as impact nears (readable ~0.5→0.05s).
+    telegraph = ((start - eta) / start).clamp(0.0, 1.0);
+    // Soft pulse so it blinks, not a static tint.
+    telegraph *= 0.72 + 0.28 * (0.5 + 0.5 * sin(_pulse * 6));
+  }
+
+  Color get _telegraphColor {
+    if (type.isWeb) return const Color(0xFFECEFF1);
+    if (type.isDynamiteCart) return const Color(0xFFFF6D00);
+    if (type.isBomb) return const Color(0xFFFF9100);
+    if (type.isSpikes) return const Color(0xFFFF8A65);
+    if (type.isPit) return const Color(0xFFEF5350);
+    return const Color(0xFFFF5252);
+  }
+
+  void _renderTelegraph(Canvas canvas) {
+    if (telegraph <= 0.04) return;
+    final t = telegraph;
+    final foot = Offset(size.x / 2, standsOnGround ? size.y - 2 : size.y * 0.55);
+    // Ground danger disc — grows as impact nears.
+    final rw = size.x * (0.55 + 0.55 * t);
+    final rh = size.y * (0.16 + 0.12 * t);
+    _telePaint.color = _telegraphColor.withValues(alpha: 0.16 + 0.28 * t);
+    canvas.drawOval(
+      Rect.fromCenter(center: foot, width: rw * 2, height: rh * 2),
+      _telePaint,
+    );
+    _teleRing
+      ..color = _telegraphColor.withValues(alpha: 0.35 + 0.55 * t)
+      ..strokeWidth = 1.6 + 2.2 * t;
+    canvas.drawOval(
+      Rect.fromCenter(center: foot, width: rw * 2.05, height: rh * 2.05),
+      _teleRing,
+    );
+    // Body warning halo.
+    final body = Offset(size.x / 2, size.y * (type.isLethalFloor ? 0.5 : 0.42));
+    _telePaint.color = _telegraphColor.withValues(alpha: 0.1 + 0.22 * t);
+    canvas.drawCircle(body, size.x * (0.42 + 0.2 * t), _telePaint);
   }
 
   @override
   void render(Canvas canvas) {
+    if (type.isHazard) {
+      _renderTelegraph(canvas);
+    }
+
     if (type.isJewel) {
       final pulse = 0.55 + 0.2 * sin(_pulse);
-      final c = Offset(size.x / 2, size.y * 0.52);
+      final c = Offset(size.x / 2, size.y * 0.55);
       final game = _game;
       final thiefThreat = game != null &&
           !game.lead.playerLeads &&
           !game.hasMagnetPower;
       if (thiefThreat || magnetBy == ItemMagnet.thief) {
-        // Revenge shimmer — jewel is about to be stolen.
         final flash = 0.35 + 0.35 * sin(_pulse * 3.2);
         _glowPaint.color =
             const Color(0xFFFF1744).withValues(alpha: 0.22 + flash * 0.35);
@@ -265,6 +350,16 @@ class FallingItem extends SpriteComponent {
         _glowPaint.color = type.color.withValues(alpha: 0.18 + pulse * 0.12);
         canvas.drawCircle(c, size.x * 0.48, _glowPaint);
       }
+      // Vertical-axis tumble — never fully collapses so spin stays readable.
+      final flip = cos(_jewelSpin);
+      final sx = flip.abs() < 0.22 ? 0.22 * flip.sign : flip;
+      canvas.save();
+      canvas.translate(c.dx, c.dy);
+      canvas.scale(sx, 1);
+      canvas.translate(-c.dx, -c.dy);
+      super.render(canvas);
+      canvas.restore();
+      return;
     }
 
     if (type.isWeb) {

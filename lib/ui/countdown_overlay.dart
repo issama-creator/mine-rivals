@@ -54,7 +54,8 @@ class _CountdownOverlayState extends State<CountdownOverlay>
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.black.withValues(alpha: 0.55),
+      // New shaft already swapped — keep 3–2–1 readable over it.
+      color: Colors.black.withValues(alpha: 0.38),
       child: Center(
         child: ScaleTransition(
           scale: Tween<double>(begin: 0.72, end: 1.08).animate(

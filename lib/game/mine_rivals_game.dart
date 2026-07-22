@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../effects/chase_arrow.dart';
 import '../effects/corridor_title.dart';
+import '../effects/diamond_collect_fx.dart';
 import '../effects/floating_text.dart';
 import '../effects/gold_trail.dart';
 import '../effects/particle_burst.dart';
@@ -205,7 +206,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   bool _checkpointOpen = false;
   /// Soft start after checkpoint risk (3–2–1).
   bool _roundCountdownOpen = false;
+  bool _biomeTransitionOpen = false;
   double _roundGraceTimer = 0;
+  /// Next mine name shown on biome transition after Continue.
+  String pendingBiomeName = AssetLibrary.corridorNames.first;
   bool _taughtMagnet = false;
   bool _taughtHeart = false;
   bool _taughtPotion = false;
@@ -526,7 +530,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _syncCorridorTheme();
     _syncExtraThieves();
     _updateFinishCheckpoints();
-    if (_checkpointOpen || _roundCountdownOpen || finished) return;
+    if (_checkpointOpen ||
+        _roundCountdownOpen ||
+        _biomeTransitionOpen ||
+        finished) {
+      return;
+    }
 
     _updateThiefBurst(step);
     _updateLeadDebt(step);
@@ -638,7 +647,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
     // No loot during the chase reveal — let the thief read first.
     if (!inChaseIntro) {
-      spawns.update(step, progress: progress, distance: distance);
+      spawns.update(
+        step,
+        progress: progress,
+        distance: distance,
+        seriesRound: seriesRound,
+      );
       _spawnUpdate(step);
       _magnetAndCatchUpdate(step);
       _stealUpdate(step);
@@ -742,7 +756,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _jewelStreak = 0;
   }
 
-  void _shake(double intensity) {
+  void _shake(double intensity, {double duration = 0.28}) {
     if (!GameSettings.instance.shakeEnabled) return;
     add(
       ScreenShake(
@@ -750,7 +764,63 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
           shakeOffset.setFrom(o);
         },
         intensity: intensity,
+        duration: duration,
         scratch: _shakeScratch,
+      ),
+    );
+  }
+
+  /// Web = soft hitch. Bomb = punch. Pit/spikes = heavy fail (camera weight).
+  void _hitJuiceWeb() {
+    _pulseBanner('Паутина!', const Color(0xFFB0BEC5));
+    add(
+      ScreenFlash(
+        color: const Color(0xFFECEFF1),
+        peakAlpha: 0.11,
+        duration: 0.28,
+      ),
+    );
+    _shake(6, duration: 0.2);
+    HapticFeedback.lightImpact();
+  }
+
+  void _hitJuiceBomb({required bool cart}) {
+    add(
+      ScreenFlash(
+        color: cart ? const Color(0xFFFF6D00) : const Color(0xFFFF9100),
+        peakAlpha: cart ? 0.28 : 0.2,
+        duration: cart ? 0.42 : 0.34,
+      ),
+    );
+    if (cart) {
+      // Second punch — heavier cart impact.
+      add(
+        ScreenFlash(
+          color: const Color(0xFFFF1744),
+          peakAlpha: 0.1,
+          duration: 0.5,
+        ),
+      );
+    }
+    _shake(cart ? 22 : 16, duration: cart ? 0.42 : 0.32);
+    HapticFeedback.heavyImpact();
+  }
+
+  void _hitJuiceLethal({required bool spikes}) {
+    HapticFeedback.heavyImpact();
+    _shake(spikes ? 24 : 28, duration: spikes ? 0.48 : 0.55);
+    add(
+      ScreenFlash(
+        color: spikes ? const Color(0xFFFF8A65) : const Color(0xFFB71C1C),
+        peakAlpha: spikes ? 0.28 : 0.32,
+        duration: 0.4,
+      ),
+    );
+    add(
+      ScreenFlash(
+        color: Colors.black,
+        peakAlpha: spikes ? 0.28 : 0.42,
+        duration: spikes ? 0.55 : 0.7,
       ),
     );
   }
@@ -1066,7 +1136,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       return;
     }
 
-    // Designed web beat (e.g. double-web → pit combo) — allow stacked webs.
+    // Designed web beat (e.g. pattern combo) — allow stacked webs.
     if (beat.type.isWeb) {
       final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
       _spawnLiveItem(
@@ -1077,45 +1147,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       return;
     }
 
-    // Lane traps — spikes / web. Pit on screen does NOT block spikes.
-    final level = background.corridorIndex + 1;
-    final laneTrapBusy = _laneTrapCooldown > 0 ||
-        liveItems.any((e) => e.type.isWeb || e.type.isSpikes);
-    final canLaneTrap = !inChaseIntro &&
-        !laneTrapBusy &&
-        !beat.type.isMagnet &&
-        !beat.type.isLethalFloor &&
-        !beat.type.isWeb &&
-        !beat.type.isHeart &&
-        !beat.type.isPotion &&
-        !beat.row;
-
-    if (canLaneTrap &&
-        level >= GameConfig.spikesFromCorridor &&
-        _rng.nextDouble() < GameConfig.spikesSpawnChance) {
-      final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
-      final spikes = _spawnLiveItem(
-        type: ItemType.spikes,
-        position: Vector2(_laneX(lane), -48),
-        fallSpeed: background.speed,
-      );
-      spikes.refreshSprite();
-      _laneTrapCooldown = GameConfig.laneTrapSpacingSec;
-      return;
-    }
-
-    if (canLaneTrap &&
-        level >= GameConfig.webFromCorridor &&
-        _rng.nextDouble() < GameConfig.webSpawnChance) {
-      final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
-      _spawnLiveItem(
-        type: ItemType.web,
-        position: Vector2(_laneX(lane), -40),
-        fallSpeed: background.speed,
-      );
-      _laneTrapCooldown = GameConfig.laneTrapSpacingSec;
-      return;
-    }
+    // Hazards only come from handcrafted patterns — no opportunistic inject.
 
     if (beat.row) {
       for (var lane = 0; lane < GameConfig.bombLaneCount; lane++) {
@@ -1428,22 +1460,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
   }
 
-  /// Player ran into a spider web — bomb-like hitch: slow + thief closes in.
-  /// (No crystal loss — that's bombs only.)
+  /// Player ran into a spider web — soft hitch (no crystal loss).
   void _triggerWebSnare() {
     _webSnareTimer = GameConfig.webSnareDuration;
-    // Same chase pipeline as a bomb / miss so the thief actually gains.
     _punishMistake(GameConfig.leadLossOnWeb);
     audio.play('miss');
-    _pulseBanner('Паутина!', const Color(0xFFB0BEC5));
-    add(
-      ScreenFlash(
-        color: const Color(0xFFECEFF1),
-        peakAlpha: 0.16,
-        duration: 0.34,
-      ),
-    );
-    _shake(10);
+    _hitJuiceWeb();
   }
 
   void _updateLeadDebt(double dt) {
@@ -1542,17 +1564,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
             color: item.type.isDynamiteCart
                 ? const Color(0xFFFF6D00)
                 : Colors.orange,
-            count: item.type.isDynamiteCart ? 16 : 10,
+            count: item.type.isDynamiteCart ? 18 : 12,
           ),
         );
-        add(
-          ScreenFlash(
-            color: const Color(0xFFFF6D00),
-            peakAlpha: item.type.isDynamiteCart ? 0.22 : 0.16,
-            duration: 0.32,
-          ),
+        _hitJuiceBomb(
+          cart: item.type.isDynamiteCart,
         );
-        _shake(item.type.isDynamiteCart ? 18 : 14);
         add(
           FloatingText(
             text: lostCrystal
@@ -1560,6 +1577,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
                 : (item.type.isDynamiteCart ? 'Вагонетка!' : 'Бум!'),
             position: item.position.clone(),
             color: lostCrystal ? const Color(0xFFFF5252) : Colors.orangeAccent,
+            fontSize: item.type.isDynamiteCart ? 26 : 22,
           ),
         );
         _releaseLiveItem(item);
@@ -1574,7 +1592,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
           ParticleBurst(
             position: item.position.clone(),
             color: const Color(0xFFECEFF1),
-            count: 8,
+            count: 10,
           ),
         );
         add(
@@ -1582,6 +1600,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
             text: item.type.popupLabel,
             position: item.position.clone(),
             color: const Color(0xFFB0BEC5),
+            fontSize: 20,
           ),
         );
         _releaseLiveItem(item);
@@ -1763,19 +1782,38 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _jewelStreak++;
     _rewardSuccess(GameConfig.leadGainOnRare);
     audio.play('rare');
+    HapticFeedback.selectionClick();
     add(BasketSpark(position: player.basketWorldCenter.clone()));
+
+    // Top HUD reaction — every diamond pickup reads from the top.
+    final youNow = stats.player.rareTotal;
+    if (_jewelStreak >= 3) {
+      _pulseBanner('◆ ×$_jewelStreak  ·  $youNow', const Color(0xFF81D4FA));
+      bannerTimer = 1.15;
+    } else {
+      _pulseBanner('◆ +1  ·  $youNow', const Color(0xFF4FC3F7));
+      bannerTimer = 0.95;
+    }
+
+    // Fly a mini diamond toward the top crystal counter (Subway juice).
+    final flyTo = Vector2(size.x * 0.22, 56);
+    add(
+      DiamondCollectFx(
+        from: item.position.clone(),
+        to: flyTo,
+      ),
+    );
 
     if (!_firstJewelJuiced) {
       _firstJewelJuiced = true;
-      _pulseBanner('Кристалл!', const Color(0xFF81D4FA));
       add(
         ScreenFlash(
           color: const Color(0xFF4FC3F7),
-          peakAlpha: 0.18,
-          duration: 0.36,
+          peakAlpha: 0.14,
+          duration: 0.28,
         ),
       );
-      _shake(6);
+      _shake(5);
       HapticFeedback.mediumImpact();
     }
 
@@ -1812,9 +1850,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     );
     add(
       FloatingText(
-        text: item.type.popupLabel,
-        position: item.position.clone(),
-        color: item.type.color,
+        text: '+1 ◆',
+        position: item.position.clone() - Vector2(0, 12),
+        color: const Color(0xFF81D4FA),
+        fontSize: 24,
       ),
     );
     _releaseLiveItem(item);
@@ -1937,12 +1976,14 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     return 'Кристаллы $you–$thief · $meters м';
   }
 
-  /// End of each series round: cash out, risk next, or thief closes the series.
+  /// End of each series round: tension checkpoint (cash out / risk / thief win).
   void _updateFinishCheckpoints() {
     if (finished ||
         _finishBeat ||
         _pitSucking ||
         _checkpointOpen ||
+        _biomeTransitionOpen ||
+        _roundCountdownOpen ||
         inChaseIntro) {
       return;
     }
@@ -1952,34 +1993,33 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     pauseEngine();
     overlays.remove('pause');
 
-    final you = stats.player.rareTotal;
-    final thief = stats.thief.rareTotal;
-    if (thief > you) {
-      _claimThiefCheckpointFinish();
-      return;
-    }
-
-    // Final round while leading/tied — series cleared.
-    if (isFinalSeriesRound && stats.playerWins) {
+    // Always show the tension screen — including thief-ahead defeat beat.
+    // Final-round auto-clear only when player already leads/ties.
+    if (isFinalSeriesRound &&
+        stats.playerWins &&
+        stats.thief.rareTotal <= stats.player.rareTotal) {
       _checkpointOpen = false;
       finishedSeriesComplete = true;
-      audio.play('combo');
       _pulseBanner('Серия пройдена!', const Color(0xFF81C784));
       endRunEarly(asVictory: true);
       return;
     }
 
-    audio.play('combo');
     overlays.add('checkpoint');
+    // Prefetch next shaft while the player decides Cash Out / Continue.
+    if (!isFinalSeriesRound) {
+      final nextIdx = seriesRound % GameConfig.corridorAssetCount;
+      unawaited(AssetLibrary.ensureCorridorReady(nextIdx));
+    }
   }
 
   /// Player cashes out the series at the checkpoint (must lead or tie).
   void acceptCheckpointFinish() {
     if (!_checkpointOpen || finished || !stats.playerWins) return;
+    if (stats.thief.rareTotal > stats.player.rareTotal) return;
     overlays.remove('checkpoint');
     _checkpointOpen = false;
     finishedSeriesComplete = isFinalSeriesRound;
-    audio.play('combo');
     _pulseBanner(
       finishedSeriesComplete ? 'Серия пройдена!' : 'Забрал камни!',
       const Color(0xFF81C784),
@@ -1987,15 +2027,80 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     endRunEarly(asVictory: true);
   }
 
-  /// Risk the next round — 3–2–1 then soft resume (thief may close later).
+  /// Risk the next round — swap mine first, then biome card → 3–2–1.
   void riskCheckpointContinue() {
     if (!_checkpointOpen || finished || isFinalSeriesRound) return;
+    if (stats.thief.rareTotal > stats.player.rareTotal) return;
     overlays.remove('checkpoint');
     _checkpointOpen = false;
     seriesRound += 1;
     _nextCheckpointM += GameConfig.seriesRoundMeters;
+    unawaited(_beginBiomeTransition());
+  }
+
+  void confirmThiefCheckpointDefeat() {
+    if (!_checkpointOpen || finished) return;
+    overlays.remove('checkpoint');
+    _checkpointOpen = false;
+    _claimThiefCheckpointFinish();
+  }
+
+  Future<void> _beginBiomeTransition() async {
+    final idx = (seriesRound - 1) % GameConfig.corridorAssetCount;
+    pendingBiomeName = AssetLibrary.corridorNames[
+        idx.clamp(0, AssetLibrary.corridorNames.length - 1)];
+    _biomeTransitionOpen = true;
+    pauseEngine();
+    // Mine must be live BEFORE the “Entering…” card / 3–2–1.
+    await _applyCheckpointBiome(idx);
+    if (!isMounted || finished || !_biomeTransitionOpen) return;
+    overlays.add('biome');
+  }
+
+  Future<void> _applyCheckpointBiome(int idx) async {
+    try {
+      await AssetLibrary.ensureCorridorReady(idx);
+    } catch (_) {
+      // Still mark desired so sync won't yank us back to the old shaft.
+      _corridorDesired = idx;
+      _corridorApplied = idx;
+      _corridorFxAt = idx;
+      return;
+    }
+    if (!isMounted || finished) return;
+    background.setCorridorIndex(idx);
+    AssetLibrary.applyCorridorJewels(idx);
+    for (final item in liveItems) {
+      if (item.type.isJewel) item.refreshSprite();
+    }
+    _corridorApplied = idx;
+    _corridorDesired = idx;
+    _corridorFxAt = idx;
+    children.whereType<CorridorTitle>().toList().forEach(
+      (e) => e.removeFromParent(),
+    );
+  }
+
+  /// Called by biome overlay when the “Entering …” beat ends.
+  void finishBiomeTransition() {
+    if (!_biomeTransitionOpen || finished) return;
+    overlays.remove('biome');
+    _biomeTransitionOpen = false;
+    // Guarantee art is on the next shaft before 3–2–1 (reload race).
+    final idx = (seriesRound - 1) % GameConfig.corridorAssetCount;
+    if (_corridorApplied != idx) {
+      unawaited(_applyCheckpointBiome(idx).then((_) {
+        if (!isMounted || finished) return;
+        _startRoundCountdown();
+      }));
+      return;
+    }
+    _startRoundCountdown();
+  }
+
+  void _startRoundCountdown() {
+    if (finished || _roundCountdownOpen) return;
     _roundCountdownOpen = true;
-    // Stay paused during countdown overlay.
     pauseEngine();
     overlays.add('countdown');
   }
@@ -2014,7 +2119,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _roundGraceTimer = GameConfig.roundResumeGraceSec;
     _playRate = GameConfig.roundResumePlayRate;
     _pulseBanner(
-      'Раунд $seriesRound/$seriesRounds',
+      pendingBiomeName,
       const Color(0xFFFFB300),
     );
     if (!finished && !_pitSucking) {
@@ -2057,6 +2162,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     pauseEngine();
     overlays.remove('checkpoint');
     overlays.remove('pause');
+    overlays.remove('biome');
     overlays.add('results');
   }
 
@@ -2112,9 +2218,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     dragX = null;
     player.resetSteer();
     audio.play('bomb');
-    HapticFeedback.heavyImpact();
-    _shake(16);
-    add(ScreenFlash(color: Colors.black, peakAlpha: 0.35, duration: 0.55));
+    _hitJuiceLethal(spikes: fromSpikes);
     _pulseBanner(
       fromSpikes ? 'Шипы!' : 'Яма!',
       fromSpikes ? const Color(0xFFFF8A65) : const Color(0xFFEF5350),
@@ -2205,6 +2309,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (finished ||
         _finishBeat ||
         _checkpointOpen ||
+        _biomeTransitionOpen ||
         _roundCountdownOpen) {
       return;
     }
@@ -2215,6 +2320,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (finished ||
         _finishBeat ||
         _checkpointOpen ||
+        _biomeTransitionOpen ||
         _roundCountdownOpen) {
       return;
     }
@@ -2233,9 +2339,11 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (!asVictory) finishedSeriesComplete = false;
     _checkpointOpen = false;
     _roundCountdownOpen = false;
+    _biomeTransitionOpen = false;
     _roundGraceTimer = 0;
     overlays.remove('checkpoint');
     overlays.remove('countdown');
+    overlays.remove('biome');
     _thiefEscapeTimer = 0;
     _finishBeat = false;
     _webSnareTimer = 0;
@@ -2253,6 +2361,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     overlays.remove('pause');
     overlays.remove('checkpoint');
     overlays.remove('countdown');
+    overlays.remove('biome');
     for (final e in List<FallingItem>.of(liveItems)) {
       _releaseLiveItem(e);
     }
@@ -2358,7 +2467,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _nextCheckpointM = GameConfig.seriesRoundMeters;
     _checkpointOpen = false;
     _roundCountdownOpen = false;
+    _biomeTransitionOpen = false;
     _roundGraceTimer = 0;
+    pendingBiomeName = AssetLibrary.corridorNames.first;
     lastRunXpGain = 0;
     lastRunCrystalsGain = 0;
     lastRunCrystalsBurned = false;
@@ -2431,25 +2542,26 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   }
 
   void _syncCorridorTheme() {
-    // Endless: cycle art every 1 km (0…9, then wrap).
-    final idx = (distance / GameConfig.corridorSegmentMeters)
-            .floor() %
-        GameConfig.corridorAssetCount;
+    // Series rounds own the shaft art (each Continue = next mine).
+    // Don't fall back to distance — that snapped the old mine back after 3–2–1.
+    final idx = (seriesRound - 1) % GameConfig.corridorAssetCount;
     if (idx == _corridorApplied && idx == _corridorDesired) return;
     if (idx == _corridorDesired && idx != _corridorApplied) return;
 
     _corridorDesired = idx;
     final gen = ++_corridorGen;
-    final km = (distance / GameConfig.corridorSegmentMeters).floor() + 1;
 
-    if (idx != _corridorFxAt && distance > 1) {
+    if (idx != _corridorFxAt && distance > 1 && !_biomeTransitionOpen && !_roundCountdownOpen) {
       _corridorFxAt = idx;
       children.whereType<CorridorTitle>().toList().forEach(
         (e) => e.removeFromParent(),
       );
       add(
         CorridorTitle(
-          label: 'Шахта $km',
+          label: pendingBiomeName.isNotEmpty
+              ? pendingBiomeName
+              : AssetLibrary.corridorNames[
+                  idx.clamp(0, AssetLibrary.corridorNames.length - 1)],
           position: Vector2(size.x * 0.5, 52),
         ),
       );

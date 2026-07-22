@@ -21,7 +21,7 @@ class _ShopSheetState extends State<ShopSheet> {
   String? _toast;
   bool _toastOk = true;
 
-  static const _gemAsset = 'assets/images/kristales/crops/c1_0.png';
+  static const _gemAsset = 'assets/images/items/diamond.png';
 
   ProgressStore get _store => ProgressStore.instance;
 

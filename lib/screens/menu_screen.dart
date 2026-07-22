@@ -11,6 +11,7 @@ import '../systems/progress_store.dart';
 import '../systems/shop_catalog.dart';
 import '../ui/game_loading_screen.dart';
 import '../ui/hud_overlay.dart';
+import '../ui/biome_transition_overlay.dart';
 import '../ui/checkpoint_overlay.dart';
 import '../ui/countdown_overlay.dart';
 import '../ui/results_overlay.dart';
@@ -1085,7 +1086,7 @@ class _PlayerMetaChip extends StatelessWidget {
 
   final VoidCallback onWalletTap;
 
-  static const _gemAsset = 'assets/images/kristales/crops/c1_0.png';
+  static const _gemAsset = 'assets/images/items/diamond.png';
 
   @override
   Widget build(BuildContext context) {
@@ -1650,6 +1651,8 @@ class _GameScreenState extends State<GameScreen> {
           'tutorial': (context, MineRivalsGame g) => TutorialOverlay(game: g),
           'checkpoint': (context, MineRivalsGame g) =>
               CheckpointOverlay(game: g),
+          'biome': (context, MineRivalsGame g) =>
+              BiomeTransitionOverlay(game: g),
           'countdown': (context, MineRivalsGame g) =>
               CountdownOverlay(game: g),
         },

@@ -231,12 +231,12 @@ class GameConfig {
   static const double bombDisplaySize = 48;
   /// Unused — pace no longer scales bombs.
   static const double bombSpeedScaleMax = 1.0;
-  /// Dynamite minecart — larger readable hazard, same explosive rules as bomb.
-  static const double dynamiteCartDisplaySize = 64;
+  /// Dynamite minecart — readable hazard, same explosive rules as bomb.
+  static const double dynamiteCartDisplaySize = 45; // ~30% smaller than 64
   /// Single-lane bomb slot → slow minecart (readable, not every gate).
   static const double dynamiteCartChance = 0.14;
-  /// Cart drifts slower than normal fall so it reads as “rolling in”.
-  static const double dynamiteCartSpeedMult = 0.72;
+  /// Faster than world scroll so the cart closes in on the player (not drifts away).
+  static const double dynamiteCartSpeedMult = 1.12;
   /// Slightly harsher chase hit than a plain bomb.
   static const double leadLossOnDynamiteCart = 10.0;
 
@@ -277,6 +277,10 @@ class GameConfig {
   static const double catchRadius = 26;
   /// Bombs: circular center-to-center touch only — near misses never explode.
   static const double bombCatchRadius = 15;
+  /// Warning window before a hazard reaches the catch line (seconds).
+  static const double hazardTelegraphSec = 0.48;
+  /// Start showing telegraph this many seconds before impact.
+  static const double hazardTelegraphStartSec = 0.52;
   /// Body brush for loot only (coins) — a bit forgiving.
   static const double bodyCatchLootHalfW = 26;
   static const double bodyCatchLootHalfH = 32;

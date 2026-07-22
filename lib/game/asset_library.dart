@@ -29,25 +29,26 @@ class AssetLibrary {
   /// First corridor (classic) — kept for callers that expect a single sprite.
   static Sprite? tunnel;
 
-  /// Ordered shafts from assets/images/bgc/1.png … 10.png.
+  /// Ordered shafts from assets/images/bgc/1.png … 10.png (index 0 → 1.png).
+  /// Names must match the art — verified against each PNG.
   static final List<Sprite> corridors = [];
   static const List<String> corridorNames = [
-    'Шахта 1',
-    'Шахта 2',
-    'Шахта 3',
-    'Шахта 4',
-    'Шахта 5',
-    'Шахта 6',
-    'Шахта 7',
-    'Шахта 8',
-    'Шахта 9',
-    'Шахта 10',
+    'Ледяная шахта', // 1.png — snow, ice, blue crystals
+    'Грибная шахта', // 2.png — moss, neon mushrooms
+    'Янтарная шахта', // 3.png — warm orange crystals, gold ore
+    'Изумрудная шахта', // 4.png — green crystals, moss
+    'Лавовая шахта', // 5.png — magma floor, red crystals
+    'Кристальная шахта', // 6.png — deep ice + blue crystal carts
+    'Аметистовая шахта', // 7.png — purple crystals / lanterns
+    'Золотая шахта', // 8.png — amber glow, gold-filled carts
+    'Моховая шахта', // 9.png — vines, emerald glow
+    'Теневая шахта', // 10.png — dark purple amethyst tunnel
   ];
   static final Map<ItemType, Sprite> items = {};
 
-  /// Per corridor: gems for that shaft.
+  /// Per-corridor jewel sets — unused; one global diamond for all shafts.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 58;
+  static const int _assetVersion = 59;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
@@ -59,8 +60,7 @@ class AssetLibrary {
 
   static final List<bool> _corridorLoaded =
       List<bool>.filled(GameConfig.corridorAssetCount, false);
-  static final List<bool> _jewelLoaded =
-      List<bool>.filled(GameConfig.corridorAssetCount, false);
+  static bool _universalDiamondLoaded = false;
 
   /// No overlap — pre-baked seamless PNGs. Overlap looked like a transparent band.
   static const double corridorSeamFadeFrac = 0;
@@ -70,7 +70,7 @@ class AssetLibrary {
       thiefRun != null &&
       skinRuns.isNotEmpty &&
       corridors.isNotEmpty &&
-      corridorJewels.isNotEmpty &&
+      items.containsKey(ItemType.diamond) &&
       _loadedVersion == _assetVersion;
 
   /// Optional background warm — never throws to the zone (avoids debugger ANR).
@@ -193,7 +193,7 @@ class AssetLibrary {
     corridors.clear();
     corridorJewels.clear();
     _corridorLoaded.fillRange(0, _corridorLoaded.length, false);
-    _jewelLoaded.fillRange(0, _jewelLoaded.length, false);
+    _universalDiamondLoaded = false;
 
     Flame.images.prefix = '';
 
@@ -224,7 +224,7 @@ class AssetLibrary {
 
     await _loadCorridorSlot(0);
     if (!alive()) return;
-    await _loadJewelSlot(0);
+    await _loadUniversalDiamond();
     if (!alive()) return;
     applyCorridorJewels(0);
     await Future<void>.delayed(const Duration(milliseconds: 16));
@@ -330,11 +330,9 @@ class AssetLibrary {
     for (var i = 1; i < GameConfig.corridorAssetCount; i++) {
       try {
         await _loadCorridorSlot(i);
-        await _loadJewelSlot(i);
       } catch (_) {
         // Keep going — missing one shaft must not kill the run.
         _corridorLoaded[i] = false;
-        _jewelLoaded[i] = false;
       }
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
@@ -344,10 +342,9 @@ class AssetLibrary {
   static Future<void> ensureCorridorReady(int index) async {
     final i = index.clamp(0, GameConfig.corridorAssetCount - 1);
     try {
-      await Future.wait([
-        _loadCorridorSlot(i),
-        _loadJewelSlot(i),
-      ]);
+      await _loadCorridorSlot(i);
+      await _loadUniversalDiamond();
+      applyCorridorJewels(i);
     } catch (_) {
       // Caller keeps previous corridor art.
     }
@@ -385,23 +382,22 @@ class AssetLibrary {
     if (i == 0) tunnel = sprite;
   }
 
-  static Future<void> _loadJewelSlot(int index) async {
-    final i = index.clamp(0, GameConfig.corridorAssetCount - 1);
-    if (_jewelLoaded[i]) return;
-    final gems = <Sprite>[];
-    final c = i + 1;
-    final loaded = await Future.wait([
-      for (var g = 0; g < 5; g++)
-        _loadImage('assets/images/kristales/crops/c${c}_$g.png'),
-    ]);
-    for (final img in loaded) {
-      gems.add(Sprite(img));
+  /// One shared diamond for every jewel type on every shaft.
+  static Future<void> _loadUniversalDiamond() async {
+    if (_universalDiamondLoaded && items.containsKey(ItemType.diamond)) {
+      return;
     }
-    while (corridorJewels.length <= i) {
-      corridorJewels.add(<Sprite>[]);
-    }
-    corridorJewels[i] = gems;
-    _jewelLoaded[i] = true;
+    final img = await _loadImage('assets/images/items/diamond.png');
+    final sprite = Sprite(img);
+    items[ItemType.diamond] = sprite;
+    items[ItemType.ruby] = sprite;
+    items[ItemType.emerald] = sprite;
+    items[ItemType.amethyst] = sprite;
+    items[ItemType.legendary] = sprite;
+    corridorJewels
+      ..clear()
+      ..add([sprite, sprite, sprite, sprite, sprite]);
+    _universalDiamondLoaded = true;
   }
 
   /// Slice one skin when picked (avoids freezing on all 7 at boot).
@@ -425,17 +421,15 @@ class AssetLibrary {
     }();
   }
 
-  /// Swap jewel art for the active shaft — coins/bombs stay global.
+  /// Keep jewel sprites pinned to the universal diamond (all corridors).
   static void applyCorridorJewels(int corridorIndex) {
-    if (corridorJewels.isEmpty) return;
-    final i = corridorIndex.clamp(0, corridorJewels.length - 1);
-    final gems = corridorJewels[i];
-    if (gems.length < 5) return;
-    items[ItemType.diamond] = gems[0];
-    items[ItemType.ruby] = gems[1];
-    items[ItemType.emerald] = gems[2];
-    items[ItemType.amethyst] = gems[3];
-    items[ItemType.legendary] = gems[4];
+    final gem = items[ItemType.diamond];
+    if (gem == null) return;
+    items[ItemType.diamond] = gem;
+    items[ItemType.ruby] = gem;
+    items[ItemType.emerald] = gem;
+    items[ItemType.amethyst] = gem;
+    items[ItemType.legendary] = gem;
   }
 
   /// Slice run frames off the UI isolate, then decode images on the main isolate.
