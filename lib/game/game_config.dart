@@ -8,7 +8,7 @@ class GameConfig {
   static const double corridorSegmentMeters = 1000;
 
   /// How many corridor PNGs ship in assets (cycle forever).
-  static const int corridorAssetCount = 10;
+  static const int corridorAssetCount = 8;
 
   /// Visual shaft cycle length (not a finish line).
   static int get corridorCount => corridorAssetCount;
@@ -73,11 +73,12 @@ class GameConfig {
     return (1.0 + shaped * 0.9) * modeSpawnTempoMult;
   }
 
-  /// Hot chase — player lead stays tight; thief gap uses meters (see min).
+  /// Hot chase — gap behind the cart only (thief never passes ahead).
   static const double startLeadDistance = 3.7;
-  static const double maxLeadDistance = 4.0;
-  /// Thief can bolt up to this many meters ahead (HUD shows the gap).
-  static const double minLeadDistance = -200.0;
+  /// Comfort gap after a full ideal line (thief visibly falls back).
+  static const double maxLeadDistance = 5.5;
+  /// Floor: pressed against the cart (never runs past the player).
+  static const double minLeadDistance = 0.0;
   /// Soft banner when he is far enough to leave the screen (no lose).
   static const double thiefEscapeLead = -32.0;
   /// Legacy — escape no longer ends the run.
@@ -85,46 +86,60 @@ class GameConfig {
   /// Visual: beyond this gap he stays off the top (gap lives in HUD).
   static const double thiefOffScreenLead = -40.0;
 
-  /// Coins while YOU lead — score only. Catch-up uses [leadGainOnCoinCatchUp].
-  static const double leadGainOnCatch = 0.0;
-  /// Jewels are the contested prize — catching them opens the gap.
-  static const double leadGainOnRare = 2.07;
-  static const double leadGainOnCombo = 1.38;
-  /// Extra lead meters added for each jewel catch in a success streak.
-  static const double successStreakLeadBonus = 0.46;
+  // ── Ideal line — clean streak opens the gap; mistakes close it ───────────
+  /// Soft recover begins after this many clean seconds.
+  static const double idealLineWarmupSec = 5.0;
+  /// Full “ideal line” pull-away after this many clean seconds (~10–15).
+  static const double idealLineSec = 12.0;
+  /// At full ideal line while you lead: open gap (m/s) — ~12s from cart→safe.
+  static const double leadRecoverPerSec = 0.30;
+  /// At full ideal line while thief ahead: reel him back (m/s), gradual.
+  static const double catchUpRecoverPerSec = 0.90;
 
-  /// While thief leads: each clean coin chips the gap (readable meters).
-  static const double leadGainOnCoinCatchUp = 2.8;
-  /// Extra per unbroken coin in the streak (soft, capped in-game).
-  static const double leadGainOnCoinCatchUpStreak = 0.35;
-  static const double catchUpLeadMaxPerCoin = 6.5;
-  /// Coins also burn chase debt so recover can kick in.
-  static const double catchUpDebtBurnPerCoin = 2.2;
-  /// Steady close while clean AND thief ahead (m/s) — no mistakes.
-  static const double catchUpRecoverPerSec = 4.2;
-
-  /// How hard catch-up hits by gap depth (0 at even → stronger when he bolted).
-  static double catchUpDepthMult(double leadDistance) {
-    if (leadDistance >= 0) return 0;
-    final depth = (-leadDistance / -minLeadDistance).clamp(0.0, 1.0);
-    return 0.75 + depth * 0.85;
+  /// 0 before warmup → 1 at [idealLineSec] (ease-in).
+  static double idealLineFactor(double cleanSec) {
+    if (cleanSec < idealLineWarmupSec) return 0;
+    final u = ((cleanSec - idealLineWarmupSec) /
+            (idealLineSec - idealLineWarmupSec))
+        .clamp(0.0, 1.0);
+    return u * u;
   }
 
-  /// Miss a coin — thief opens the meter gap.
-  static const double leadLossOnMiss = 5.5;
-  static const double leadLossOnMissRare = 7.5;
-  static const double leadLossOnBomb = 8.5;
-  static const double leadLossPerMistakeStreak = 2.2;
-  /// How fast pending chase debt drains into real lead (m/s) — smoother.
-  static const double leadDebtPerSec = 6.5;
+  /// Coins while YOU lead — score only. Catch-up uses [leadGainOnCoinCatchUp].
+  static const double leadGainOnCatch = 0.0;
+  /// Jewels help a little — main gap open is the ideal line.
+  static const double leadGainOnRare = 0.42;
+  static const double leadGainOnCombo = 0.55;
+  /// Extra lead meters added for each jewel catch in a success streak.
+  static const double successStreakLeadBonus = 0.12;
+
+  /// While thief leads: each clean coin chips the gap (readable meters).
+  static const double leadGainOnCoinCatchUp = 1.6;
+  /// Extra per unbroken coin in the streak (soft, capped in-game).
+  static const double leadGainOnCoinCatchUpStreak = 0.22;
+  static const double catchUpLeadMaxPerCoin = 4.0;
+  /// Coins also burn chase debt so recover can kick in.
+  static const double catchUpDebtBurnPerCoin = 1.6;
+
+  /// How hard catch-up hits by gap depth — unused while thief can't pass ahead.
+  static double catchUpDepthMult(double leadDistance) {
+    if (leadDistance >= 0) return 0;
+    return 1.0;
+  }
+
+  /// ~3 coin misses ≈ from safe lead to cart; obstacles hit harder.
+  static const double leadLossOnMiss = 1.25;
+  static const double leadLossOnMissRare = 1.45;
+  static const double leadLossOnBomb = 2.05;
+  static const double leadLossPerMistakeStreak = 0.28;
+  /// How fast pending chase debt drains into real lead (m/s) — slow creep.
+  static const double leadDebtPerSec = 2.2;
   /// Cap so one bad streak can't dump the full 200 m instantly.
   static const double leadDebtMax = 55.0;
-  /// Slow recover toward start lead while you already lead (clean play).
-  static const double leadRecoverPerSec = 0.092;
   /// How fast the thief eases when you pull ahead (goes back).
-  static const double leadVisualFollow = 1.35;
-  /// How fast he eases when closing after your mistakes (slow approach).
-  static const double leadVisualFollowMistake = 0.62;
+  static const double leadVisualFollow = 1.15;
+  /// How fast he eases when closing after your mistakes (slow creep to cart).
+  static const double leadVisualFollowMistake = 0.48;
   /// Extra smoothing on thief screen Y (kills leftover hops).
   static const double thiefYSmooth = 4.2;
   static const double thiefScaleSmooth = 5.0;
@@ -163,24 +178,32 @@ class GameConfig {
 
   static const double playerWidth = 66;
   static const double playerHeight = 128;
-  /// Slightly smaller than the miner so the rivalry reads clearer.
-  static const double thiefWidth = 60;
-  static const double thiefHeight = 118;
+  /// Top-down cart pusher — cells are tall (cart above, miner below).
+  static const double playerCartWidth = 104;
+  static const double playerCartHeight = 116;
+  /// Thief same pose, ~12% smaller so the hero reads as primary.
+  static const double thiefWidth = 92;
+  static const double thiefHeight = 102;
+  /// Top-down vor sheet — clean 6×4 (24 frames).
+  static const int thiefSheetColumns = 6;
+  static const int thiefSheetRows = 4;
+  /// Slow walk cycle — readable stride, not a leg twitch.
+  static const int thiefRunFps = 10;
   /// Slight boost over depth scale — keep the miner readable, not oversized.
-  static const double playerHeroScale = 0.98;
+  static const double playerHeroScale = 1.0;
 
   /// Soft lane steer (velocity follow, not a hard snap).
-  static const double playerSteerSpeed = 13;
+  static const double playerSteerSpeed = 11.5;
   /// How quickly steer velocity eases toward the finger intent.
-  static const double playerSteerAccel = 8.5;
-  /// Max lateral speed (px/s) — keeps dodges readable.
-  static const double playerSteerMaxSpeed = 600;
+  static const double playerSteerAccel = 6.8;
+  /// Max lateral speed (px/s) — keeps dodges readable, not snappy.
+  static const double playerSteerMaxSpeed = 520;
   /// Finger drag slightly longer than 1:1 for comfortable lane swaps.
-  static const double playerDragGain = 1.08;
+  static const double playerDragGain = 1.06;
   /// Late run — a bit more bite without losing the smooth arc.
-  static const double playerSteerFinaleBoost = 1.06;
+  static const double playerSteerFinaleBoost = 1.04;
   /// Body lean while strafing (radians at full speed).
-  static const double playerSteerLean = 0.08;
+  static const double playerSteerLean = 0.06;
 
   /// 0 = очень плавно, 1 = резко ([GameSettings.controlSensitivity]).
   static double get steerFeel =>
@@ -191,23 +214,23 @@ class GameConfig {
       soft + (sharp - soft) * steerFeel;
 
   static double get steerSpeed =>
-      playerSteerSpeed * _steerLerp(0.55, 1.45);
+      playerSteerSpeed * _steerLerp(0.42, 1.28);
   static double get steerAccel =>
-      playerSteerAccel * _steerLerp(0.48, 1.7);
+      playerSteerAccel * _steerLerp(0.38, 1.45);
   static double get steerMaxSpeed =>
-      playerSteerMaxSpeed * _steerLerp(0.62, 1.35);
+      playerSteerMaxSpeed * _steerLerp(0.55, 1.22);
   static double get steerDragGain =>
-      playerDragGain * _steerLerp(0.82, 1.22);
+      playerDragGain * _steerLerp(0.78, 1.15);
   static double get steerFinaleBoost =>
-      playerSteerFinaleBoost * _steerLerp(0.92, 1.12);
+      playerSteerFinaleBoost * _steerLerp(0.94, 1.08);
   static double get steerLean =>
-      playerSteerLean * _steerLerp(0.7, 1.35);
+      playerSteerLean * _steerLerp(0.55, 1.2);
 
   /// Soft depth for the trailing thief only — hero never uses far shrink.
   static const double depthScaleNear = 1.0;
-  static const double depthScaleFar = 0.72;
-  /// At full 5 m lead the thief is small, but the miner stays full size.
-  static const double thiefMaxLeadScale = 0.42;
+  static const double depthScaleFar = 0.78;
+  /// At full lead the thief is smaller, but still readable (not a speck).
+  static const double thiefMaxLeadScale = 0.55;
   static const double basketWidth = 58;
   static const double basketHeight = 32;
 
@@ -238,7 +261,7 @@ class GameConfig {
   /// Faster than world scroll so the cart closes in on the player (not drifts away).
   static const double dynamiteCartSpeedMult = 1.12;
   /// Slightly harsher chase hit than a plain bomb.
-  static const double leadLossOnDynamiteCart = 10.0;
+  static const double leadLossOnDynamiteCart = 2.45;
 
   static const double magnetRadius = 16;
   static const double magnetPullSpeed = 45;
@@ -355,8 +378,8 @@ class GameConfig {
   static const double webSnareMoveFactor = 0.32;
   /// World + stride slow while snared (bomb-like hitch, a bit softer).
   static const double webSnarePlayRate = 0.55;
-  /// Chase pressure — close to a bomb, but no crystal loss.
-  static const double leadLossOnWeb = 6.5;
+  /// Chase pressure — obstacle soft hit (no crystal loss from web alone).
+  static const double leadLossOnWeb = 1.85;
 
   /// Three dodge lanes — always at least one clear row to slip through.
   static const int bombLaneCount = 3;
@@ -366,9 +389,23 @@ class GameConfig {
   static const double bombCooldownMin = 0.95;
   static const double bombCooldownMax = 1.85;
 
-  // ── Pit (black hole) — instant fail ──────────────────────────────────────
+  // ── Cart fight — thief steals bank when he reaches the cart ───────────────
+  /// Lead ≤ this → thief is on the cart (steal ticks).
+  static const double cartTouchLeadMax = 0.55;
+  /// Seconds between bank steals while near the cart.
+  static const double cartStealInterval = 1.5;
+  /// +1 to thief (from your bank) when he is near — no grab anim.
+  static const int cartStealAmount = 1;
+  /// Pit / spikes soft-fail — heavy debt (meters queued into chase).
+  static const double leadLossOnPit = 3.6;
+  static const double leadLossOnSpikes = 3.2;
+  /// Brief world hitch after soft floor hit (seconds).
+  static const double floorSoftStunSec = 0.55;
+  static const double floorSoftStunPlayRate = 0.38;
+
+  // ── Pit (black hole) — soft fail (closes gap, no run end) ─────────────────
   static const double pitDisplaySize = 52;
-  /// Touch radius vs player feet / basket — forgiving edge, lethal center.
+  /// Touch radius vs player feet / basket — forgiving edge, heavy soft hit.
   static const double pitCatchRadius = 22;
   /// Legacy base — prefer [pitSpawnChanceAt].
   static const double pitSpawnChance = 0.10;
@@ -426,13 +463,13 @@ class GameConfig {
   static const double chaseIntroSec = 2.35;
 
   /// Walkable stone path inset from each screen edge (player steering).
-  /// ~0.27 keeps the miner on the cobbles, out of wall mushrooms/ice.
-  static const double pathInsetFrac = 0.27;
+  /// ~0.247 → path ~50.6% wide (~10% wider than the old 0.46 band).
+  static const double pathInsetFrac = 0.247;
   /// Extra padding inside the path so sprites don't kiss the rock edge.
   static const double pathPadPx = 6;
 
-  /// Normal loot/bombs: tighter center band for the 3 rows (~56% width).
-  static const double spawnInsetFrac = 0.28;
+  /// Normal loot/bombs: center band scaled with the wider path.
+  static const double spawnInsetFrac = 0.258;
   /// Rare “in the bushes” spawn near the wall ice (still on path edge).
   static const double bushSpawnChance = 0.14;
   static const double bushInsetFrac = 0.17;
@@ -464,15 +501,16 @@ class GameConfig {
   /// Mild shrink when thief is deep ahead up the corridor.
   static const double thiefAheadScale = 0.72;
 
-  /// 1-based shaft: blue thief joins from this corridor onward (after 6).
-  /// @Deprecated — blue thief is mode-based (Long = 2 thieves from start).
-  static const int blueThiefFromCorridor = 999;
   static const double thiefLaneOffsetX = 44;
   static const double thiefPassExtraX = 58;
   static const double thiefMinClearanceX = 56;
 
   static const int runFps = 9;
-  /// Slightly snappier stride so airborne feet don't hang a beat.
-  static const int minerRunFps = 9;
+  /// Upright skins — classic stride.
+  static const int minerRunFps = 15;
+  /// Cart / top-down sheets — slow deliberate push stride.
+  static const int minerCartRunFps = 10;
+  /// Soft ceiling so late-run pace doesn't skip frames.
+  static const double minerCartAnimRateMax = 1.15;
   static const int runFrames = 18;
 }

@@ -5,11 +5,12 @@ import 'package:flutter/material.dart';
 import '../game/asset_library.dart';
 import '../items/item_type.dart';
 
-/// Subway-style: diamond pops and flies toward the top HUD after a catch.
+/// Crystal pops and flies into the cart bed after a catch.
 class DiamondCollectFx extends SpriteComponent {
   DiamondCollectFx({
     required Vector2 from,
     required Vector2 to,
+    this.onArrive,
   }) : super(
           position: from.clone(),
           size: Vector2(28, 35),
@@ -20,6 +21,8 @@ class DiamondCollectFx extends SpriteComponent {
   }
 
   late final Vector2 _to;
+  final VoidCallback? onArrive;
+  bool _arrived = false;
 
   @override
   Future<void> onLoad() async {
@@ -35,18 +38,23 @@ class DiamondCollectFx extends SpriteComponent {
     add(
       MoveToEffect(
         _to,
-        EffectController(duration: 0.55, curve: Curves.easeInCubic),
+        EffectController(duration: 0.48, curve: Curves.easeInCubic),
+        onComplete: () {
+          if (_arrived) return;
+          _arrived = true;
+          onArrive?.call();
+        },
       ),
     );
     add(
       ScaleEffect.to(
-        Vector2.all(0.35),
-        EffectController(duration: 0.55, curve: Curves.easeIn),
+        Vector2.all(0.32),
+        EffectController(duration: 0.48, curve: Curves.easeIn),
       ),
     );
     add(
       OpacityEffect.fadeOut(
-        EffectController(startDelay: 0.32, duration: 0.28),
+        EffectController(startDelay: 0.28, duration: 0.24),
         onComplete: removeFromParent,
       ),
     );

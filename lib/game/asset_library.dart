@@ -21,7 +21,6 @@ class AssetLibrary {
 
   static SpriteAnimation? minerRun;
   static SpriteAnimation? thiefRun;
-  static SpriteAnimation? thiefRunBlue;
 
   /// All playable skins keyed by [PlayerSkin.id].
   static final Map<String, SpriteAnimation> skinRuns = {};
@@ -33,27 +32,24 @@ class AssetLibrary {
   /// Names must match the art — verified against each PNG.
   static final List<Sprite> corridors = [];
   static const List<String> corridorNames = [
-    'Ледяная шахта', // 1.png — snow, ice, blue crystals
-    'Грибная шахта', // 2.png — moss, neon mushrooms
-    'Янтарная шахта', // 3.png — warm orange crystals, gold ore
-    'Изумрудная шахта', // 4.png — green crystals, moss
-    'Лавовая шахта', // 5.png — magma floor, red crystals
-    'Кристальная шахта', // 6.png — deep ice + blue crystal carts
-    'Аметистовая шахта', // 7.png — purple crystals / lanterns
-    'Золотая шахта', // 8.png — amber glow, gold-filled carts
-    'Моховая шахта', // 9.png — vines, emerald glow
-    'Теневая шахта', // 10.png — dark purple amethyst tunnel
+    'Ледяная шахта', // 1 — snow, ice, blue crystals
+    'Грибная шахта', // 2 — bioluminescent mushrooms
+    'Изумрудная шахта', // 3
+    'Янтарная шахта', // 4
+    'Аметистовая шахта', // 5 — purple crystals
+    'Лавовая шахта', // 6
+    'Моховая шахта', // 7
+    'Кристальная шахта', // 8 — blue / gold crystals
   ];
   static final Map<ItemType, Sprite> items = {};
 
   /// Per-corridor jewel sets — unused; one global diamond for all shafts.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 59;
+  static const int _assetVersion = 69;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
   static final Map<String, Future<void>> _skinFutures = {};
-  static Future<void>? _thiefBlueFuture;
   static bool _prefetchStarted = false;
   /// Bumps when a new core load starts — stale loads must not write results.
   static int _loadGen = 0;
@@ -115,19 +111,6 @@ class AssetLibrary {
     }());
   }
 
-  /// Soft blue-thief load — never throws to the zone (Long mode background).
-  static Future<void> ensureThiefBlueLoadedSafe() async {
-    try {
-      await ensureThiefBlueLoaded();
-    } catch (e, st) {
-      assert(() {
-        // ignore: avoid_print
-        print('Blue thief load skipped: $e\n$st');
-        return true;
-      }());
-    }
-  }
-
   static Future<void> ensureLoaded({bool prefetchRest = false}) async {
     Flame.images.prefix = '';
     if (ready) {
@@ -184,10 +167,8 @@ class AssetLibrary {
     items.clear();
     minerRun = null;
     thiefRun = null;
-    thiefRunBlue = null;
     skinRuns.clear();
     _skinFutures.clear();
-    _thiefBlueFuture = null;
     _prefetchStarted = false;
     tunnel = null;
     corridors.clear();
@@ -315,12 +296,13 @@ class AssetLibrary {
   }
 
   static Future<void> _loadThiefPrimary() async {
-    final thiefImg = await _loadImage('assets/images/vors/vor1.png');
-    thiefRun = await _sliceRunAnimationStabilized(
+    // Top-down vor sheet — numbers stripped, in-between frames baked in.
+    final thiefImg = await _loadImage('assets/images/vors/vor.png');
+    thiefRun = _sliceSimpleGrid(
       thiefImg,
-      columns: 9,
-      rows: 2,
-      stepTime: 1 / GameConfig.runFps,
+      columns: GameConfig.thiefSheetColumns,
+      rows: GameConfig.thiefSheetRows,
+      stepTime: 1 / GameConfig.thiefRunFps,
     );
   }
 
@@ -336,7 +318,6 @@ class AssetLibrary {
       }
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
-    await ensureThiefBlueLoadedSafe();
   }
 
   static Future<void> ensureCorridorReady(int index) async {
@@ -348,24 +329,6 @@ class AssetLibrary {
     } catch (_) {
       // Caller keeps previous corridor art.
     }
-  }
-
-  static Future<void> ensureThiefBlueLoaded() {
-    if (thiefRunBlue != null) return Future.value();
-    return _thiefBlueFuture ??= () async {
-      try {
-        final thiefBlueImg = await _loadImage('assets/images/vors/vor-blue.png');
-        thiefRunBlue = await _sliceRunAnimationStabilized(
-          thiefBlueImg,
-          columns: 9,
-          rows: 2,
-          stepTime: 1 / GameConfig.runFps,
-        );
-      } catch (_) {
-        _thiefBlueFuture = null;
-        rethrow;
-      }
-    }();
   }
 
   /// Raw corridor art for all shafts (1.png…10.png) — no seam bake / no alpha fade.
@@ -408,17 +371,53 @@ class AssetLibrary {
         Flame.images.prefix = '';
         final skin = PlayerSkins.byId(skinId);
         final img = await _loadImage(skin.sheetAsset);
-        skinRuns[skin.id] = await _sliceRunAnimationStabilized(
-          img,
-          columns: 9,
-          rows: 2,
-          stepTime: 1 / GameConfig.minerRunFps,
-        );
+        if (skin.cartStyle || skin.rows > 2 || skin.columns != 9) {
+          skinRuns[skin.id] = _sliceSimpleGrid(
+            img,
+            columns: skin.columns,
+            rows: skin.rows,
+            stepTime: 1 /
+                (skin.cartStyle
+                    ? GameConfig.minerCartRunFps
+                    : GameConfig.minerRunFps),
+          );
+        } else {
+          skinRuns[skin.id] = await _sliceRunAnimationStabilized(
+            img,
+            columns: skin.columns,
+            rows: skin.rows,
+            stepTime: 1 / GameConfig.minerRunFps,
+          );
+        }
       } catch (_) {
         _skinFutures.remove(skinId);
         rethrow;
       }
     }();
+  }
+
+  /// Even grid slice (full sheet, all cells) — used by cart miner 5×4.
+  static SpriteAnimation _sliceSimpleGrid(
+    ui.Image image, {
+    required int columns,
+    required int rows,
+    required double stepTime,
+  }) {
+    final frameW = image.width / columns;
+    final frameH = image.height / rows;
+    final frames = <Sprite>[];
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < columns; col++) {
+        frames.add(
+          Sprite(
+            image,
+            srcPosition: Vector2(col * frameW, row * frameH),
+            srcSize: Vector2(frameW, frameH),
+          ),
+        );
+      }
+    }
+    return SpriteAnimation.spriteList(frames, stepTime: stepTime, loop: true);
   }
 
   /// Keep jewel sprites pinned to the universal diamond (all corridors).

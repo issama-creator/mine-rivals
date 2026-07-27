@@ -41,25 +41,13 @@ class ProgressStore {
   SharedPreferences? _prefs;
 
   /// Free skins — always available.
-  static const Set<String> freeSkins = {'player', 'woman'};
+  static const Set<String> freeSkins = {'p5'};
 
   /// Consecutive perfect-mission days → unlock that skin.
-  static const Map<int, String> streakUnlocks = {
-    7: 'ninja',
-    14: 'robot',
-    21: 'monkey',
-    28: 'pingvin',
-    35: 'mag',
-  };
+  static const Map<int, String> streakUnlocks = {};
 
   /// Alternate path — beat a personal distance PB threshold (no streak needed).
-  static const Map<int, String> careerDistanceUnlocks = {
-    1800: 'ninja',
-    2800: 'robot',
-    4000: 'monkey',
-    5500: 'pingvin',
-    7000: 'mag',
-  };
+  static const Map<int, String> careerDistanceUnlocks = {};
 
   final Set<String> unlockedSkins = {...freeSkins};
   int missionStreak = 0;

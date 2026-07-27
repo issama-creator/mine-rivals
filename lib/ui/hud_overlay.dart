@@ -36,8 +36,10 @@ class _HudOverlayState extends State<HudOverlay> {
   int _lastThiefGap = -1;
   int _lastSeriesRound = -1;
   int _lastMetersToCp = -1;
-  bool _lastBurst = false;
+      bool _lastBurst = false;
   bool _lastBreath = false;
+  bool _lastCartSteal = false;
+  bool _lastIdeal = false;
   int _lastHearts = -1;
   bool _lastPotion = false;
   bool _lastCanPotion = false;
@@ -69,6 +71,8 @@ class _HudOverlayState extends State<HudOverlay> {
       final magnetSec = g.magnetPowerSeconds.ceil();
       final burst = g.isThiefBursting;
       final breath = g.isThiefBreathing;
+      final cartSteal = g.isThiefStealingCart;
+      final ideal = g.isIdealLine;
       final hearts = g.hearts;
       final potion = g.hasPotion;
       final canPotion = g.canUsePotion;
@@ -88,6 +92,8 @@ class _HudOverlayState extends State<HudOverlay> {
           magnetSec == _lastMagnetSec &&
           burst == _lastBurst &&
           breath == _lastBreath &&
+          cartSteal == _lastCartSteal &&
+          ideal == _lastIdeal &&
           hearts == _lastHearts &&
           potion == _lastPotion &&
           canPotion == _lastCanPotion &&
@@ -109,6 +115,8 @@ class _HudOverlayState extends State<HudOverlay> {
       _lastMagnetSec = magnetSec;
       _lastBurst = burst;
       _lastBreath = breath;
+      _lastCartSteal = cartSteal;
+      _lastIdeal = ideal;
       _lastHearts = hearts;
       _lastPotion = potion;
       _lastCanPotion = canPotion;
@@ -314,9 +322,9 @@ class _HudOverlayState extends State<HudOverlay> {
                             ],
                           ),
                           child: Text(
-                            youLead
-                                ? 'Раунд ${game.seriesRound}/${game.seriesRounds} · ${game.metersToCheckpoint} м'
-                                : 'Вор +${game.thiefGapMeters} м · р.${game.seriesRound}/${game.seriesRounds}',
+                            game.isThiefStealingCart
+                                ? 'Вор рядом · +1 · р.${game.seriesRound}/${game.seriesRounds}'
+                                : 'Вор ${game.thiefBehindMeters} м сзади · р.${game.seriesRound}/${game.seriesRounds}',
                           ),
                         ),
                       ],
@@ -437,6 +445,22 @@ class _HudOverlayState extends State<HudOverlay> {
               IgnorePointer(
                 child: _toast('Рывок!', const Color(0xFFCE93D8)),
               ),
+            ] else if (game.isThiefStealingCart) ...[
+              const SizedBox(height: 6),
+              IgnorePointer(
+                child: _toast(
+                  'Вор рядом · копит +1',
+                  const Color(0xFFEF5350),
+                ),
+              ),
+            ] else if (game.isIdealLine) ...[
+              const SizedBox(height: 6),
+              IgnorePointer(
+                child: _toast(
+                  'Идеальная линия · вор отстаёт',
+                  const Color(0xFF66BB6A),
+                ),
+              ),
             ] else if (game.hasMagnetPower) ...[
               const SizedBox(height: 6),
               IgnorePointer(
@@ -454,7 +478,7 @@ class _HudOverlayState extends State<HudOverlay> {
               const SizedBox(height: 6),
               IgnorePointer(
                 child: _toast(
-                  'Вор дышит в спину!',
+                  'Вор у тележки!',
                   const Color(0xFFFF8A65),
                 ),
               ),

@@ -63,6 +63,24 @@ class AudioManager {
     unawaited(_playAssetPitched('catch', pitch.clamp(0.92, 1.55)));
   }
 
+  /// Thief laugh when looting the cart — steal sting, a bit lower.
+  Future<void> playStealLaugh() async {
+    if (!enabled) return;
+    _haptic('steal');
+    if (!_assetsReady) {
+      SystemSound.play(SystemSoundType.click);
+      SystemSound.play(SystemSoundType.click);
+      return;
+    }
+    unawaited(_playAssetPitched('steal', 0.82));
+    unawaited(Future<void>.delayed(const Duration(milliseconds: 90), () {
+      unawaited(_playAssetPitched('steal', 1.08));
+    }));
+  }
+
+  /// Checkpoint sting — bright tally feel.
+  Future<void> playCheckpoint() => play('combo');
+
   Future<void> _playAsset(String key) async {
     try {
       await FlameAudio.play('$key.wav', volume: 0.55);

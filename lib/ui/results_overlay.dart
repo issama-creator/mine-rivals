@@ -140,7 +140,7 @@ class _ResultsOverlayState extends State<ResultsOverlay>
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            'Обгоны: ты ${game.playerOvertakes} · вор ${game.thiefOvertakes}',
+                            'Кристаллы: ты ${game.stats.player.rareTotal} · вор ${game.stats.thief.rareTotal}',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.55),
@@ -331,10 +331,10 @@ class _MetaPull extends StatelessWidget {
     final need = store.minerXpForNextLevel;
     final hook = store.comebackHook();
     final tip = failed
-        ? 'Сердце спасает · монеты догоняют вора'
+        ? 'Ошибки не убивают · не подпускай вора к тележке'
         : (win
             ? 'Забери банк на чекпоинте — или рискни'
-            : 'Собери больше камней, чем вор');
+            : 'Довези кристаллы до чекпоинта раньше вора');
 
     return DecoratedBox(
       decoration: BoxDecoration(

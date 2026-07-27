@@ -120,6 +120,16 @@ class _CheckpointOverlayState extends State<CheckpointOverlay>
                             ),
                           ),
                           const SizedBox(height: 18),
+                          Text(
+                            thiefLeads ? 'ИТОГ РАУНДА' : 'ПОДСЧЁТ ДОБЫЧИ',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.55),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                              letterSpacing: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
                           _ScoreRow(you: you, thief: thief),
                           const SizedBox(height: 14),
                           if (thiefLeads) ...[
@@ -358,14 +368,23 @@ class _ScoreCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              '$value',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 32,
-                height: 1,
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: value.toDouble()),
+              duration: Duration(
+                milliseconds: (420 + value * 28).clamp(420, 1400),
               ),
+              curve: Curves.easeOutCubic,
+              builder: (context, v, _) {
+                return Text(
+                  '${v.round()}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 32,
+                    height: 1,
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 4),
             Text(

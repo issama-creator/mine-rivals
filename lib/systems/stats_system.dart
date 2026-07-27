@@ -71,29 +71,32 @@ class CollectorStats {
     currentStreak = 0;
   }
 
-  /// Bomb penalty — remove one rare crystal if any.
-  bool loseOneRare() {
+  /// Bomb / cart-steal penalty — remove one rare crystal if any.
+  bool loseOneRare() => loseOneRareTyped() != null;
+
+  /// Same as [loseOneRare], but returns the type removed (for thief transfer).
+  ItemType? loseOneRareTyped() {
     if (legendary > 0) {
       legendary--;
-      return true;
+      return ItemType.legendary;
     }
     if (amethyst > 0) {
       amethyst--;
-      return true;
+      return ItemType.amethyst;
     }
     if (emerald > 0) {
       emerald--;
-      return true;
+      return ItemType.emerald;
     }
     if (ruby > 0) {
       ruby--;
-      return true;
+      return ItemType.ruby;
     }
     if (diamond > 0) {
       diamond--;
-      return true;
+      return ItemType.diamond;
     }
-    return false;
+    return null;
   }
 }
 

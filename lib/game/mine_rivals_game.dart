@@ -53,7 +53,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
   late PlayerComponent player;
   late ThiefComponent thief;
-  ThiefComponent? thiefBlue;
   late ParallaxBackground background;
   late ChaseArrow chaseArrow;
 
@@ -82,9 +81,30 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       lead.playerLeads &&
       lead.leadDistance.abs() <= GameConfig.thiefBreathLeadMax;
 
+  /// Clean streak long enough that the thief is visibly falling back.
+  bool get isIdealLine =>
+      !finished &&
+      !inChaseIntro &&
+      _leadDebt <= 0 &&
+      !isThiefBursting &&
+      cleanTimer >= GameConfig.idealLineSec;
+
+  /// Thief reached the cart — draining bank crystals over time.
+  bool get isThiefAtCart =>
+      !finished &&
+      !inChaseIntro &&
+      !_checkpointOpen &&
+      lead.leadDistance <= GameConfig.cartTouchLeadMax;
+
+  bool get isThiefStealingCart =>
+      isThiefAtCart && stats.player.rareTotal > 0;
+
   double _breathFlashTimer = 0;
   double _breathBannerCd = 0;
   bool _wasBreathing = false;
+  double _cartStealTimer = 0;
+  double _floorStunTimer = 0;
+  bool _idealLineBannerShown = false;
 
   /// Time left stuck in a spider web (player sluggish, thief gains).
   double _webSnareTimer = 0;
@@ -114,8 +134,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       !finished &&
       !_finishBeat &&
       !inChaseIntro &&
-      (!lead.playerLeads ||
-          lead.leadDistance.abs() <= GameConfig.potionUseLeadMax);
+      lead.leadDistance <= GameConfig.potionUseLeadMax;
 
   int playerOvertakes = 0;
   int thiefOvertakes = 0;
@@ -179,11 +198,11 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   Color bannerColor = const Color(0xFFEF5350);
   double bannerTimer = 0;
 
-  /// Instant-fail (pit / spikes / thief escape) — results show loss, not jewel win.
+  /// Legacy fail flag (forfeit / rare paths) — pit/spikes no longer end the run.
   bool failedRun = false;
-  /// Pit suck vs thief ran off with crystals.
+  /// Thief ran off with crystals (legacy escape path).
   bool failedByThiefEscape = false;
-  /// Lethal floor was spikes (not pit) — results copy differs.
+  /// Soft floor was spikes (not pit) — results copy if ever used.
   bool failedBySpikes = false;
   /// Player claimed win via Финиш while leading crystals.
   bool finishedByChoice = false;
@@ -227,10 +246,8 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   double _introT = 0;
   bool get inChaseIntro => _introT < GameConfig.chaseIntroSec;
 
-  /// Pit suck cinematic before results.
+  /// Legacy guard — soft-fail floors no longer enter a suck cinematic.
   bool _pitSucking = false;
-  double _pitSuckT = 0;
-  Vector2? _pitSuckAt;
 
   double get playRate => _playRate;
 
@@ -245,7 +262,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _packCache
       ..clear()
       ..add(thief);
-    if (thiefBlue != null) _packCache.add(thiefBlue!);
     return _packCache;
   }
 
@@ -299,41 +315,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     await add(chaseArrow);
     await add(GoldTrail());
 
-    lead.onOvertakeStarted = (leader) {
-      final preferRight = player.position.x <= size.x * 0.5;
-      thief.passSide = preferRight ? 1.0 : -1.0;
-      audio.play('overtake');
-      final mid = Vector2(
-        (player.position.x + thief.position.x) * 0.5,
-        (player.position.y + thief.position.y) * 0.5,
-      );
-      add(DustPuff(position: mid.clone()));
-      add(DustPuff(position: mid + Vector2(16 * thief.passSide, 8)));
-      if (leader == Leader.thief) {
-        thiefOvertakes++;
-        _pulseBanner('Вор впереди', const Color(0xFFEF5350));
-        add(
-          ScreenFlash(
-            color: const Color(0xFFEF5350),
-            peakAlpha: 0.18,
-            duration: 0.34,
-          ),
-        );
-        _shake(14);
-      } else {
-        playerOvertakes++;
-        _pulseBanner('Ты впереди', const Color(0xFF66BB6A));
-        add(
-          ScreenFlash(
-            color: const Color(0xFF66BB6A),
-            peakAlpha: 0.12,
-            duration: 0.28,
-          ),
-        );
-        _shake(8);
-      }
-    };
-
+    // Overtake pass removed — thief only creeps to the cart and steals.
     _layoutActors();
     _introT = 0;
     // Start with thief almost on your heels so the chase is obvious.
@@ -345,9 +327,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     unawaited(_applyShopLoadout());
     // Heavy corridor decode after the first frame is up.
     AssetLibrary.startBackgroundPrefetch();
-    if (GameSettings.instance.runMode.thiefCount >= 2) {
-      unawaited(AssetLibrary.ensureThiefBlueLoadedSafe());
-    }
     if (!ProgressStore.instance.tutorialSeen) {
       overlays.add('tutorial');
       pauseEngine();
@@ -383,10 +362,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     player.position = Vector2(size.x * 0.5, depth.playerY);
     player.applyDepthScale(depth.playerScale);
     for (final t in _pack) {
-      t.position.setValues(
-        size.x * 0.5 + t.laneBias,
-        depth.thiefY + t.depthBias,
-      );
+      t.position.setValues(size.x * 0.5, depth.thiefY);
       t.applyDepthScale(depth.thiefScale);
     }
     _updateDrawOrder();
@@ -470,7 +446,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
 
     if (_pitSucking) {
-      _updatePitSuck(dt);
+      _pitSucking = false;
       return;
     }
 
@@ -514,6 +490,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     if (_webSnareTimer > 0) {
       targetRate = min(targetRate, GameConfig.webSnarePlayRate);
     }
+    if (_floorStunTimer > 0) {
+      _floorStunTimer = max(0, _floorStunTimer - dt);
+      targetRate = min(targetRate, GameConfig.floorSoftStunPlayRate);
+    }
     _playRate += (targetRate - _playRate) * (1 - (1 / (1 + 8 * dt)));
     final step = dt * _playRate;
     final pace = GameConfig.runSpeedAt(distance);
@@ -528,7 +508,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       t.setRunAnimRate(animRate);
     }
     _syncCorridorTheme();
-    _syncExtraThieves();
     _updateFinishCheckpoints();
     if (_checkpointOpen ||
         _roundCountdownOpen ||
@@ -540,9 +519,30 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _updateThiefBurst(step);
     _updateLeadDebt(step);
     _updateThiefBreath(step);
-    final playingClean = cleanTimer > 2.5 && _leadDebt <= 0 && !isThiefBursting;
-    lead.update(step, playingClean: playingClean && !inChaseIntro);
+    final cleanReady =
+        cleanTimer >= GameConfig.idealLineWarmupSec &&
+        _leadDebt <= 0 &&
+        !isThiefBursting &&
+        !inChaseIntro;
+    final idealFactor = GameConfig.idealLineFactor(cleanTimer);
+    lead.update(
+      step,
+      playingClean: cleanReady,
+      idealFactor: idealFactor,
+    );
+    final wasIdeal = _idealLineBannerShown;
     cleanTimer += step;
+    if (!wasIdeal &&
+        cleanTimer >= GameConfig.idealLineSec &&
+        _leadDebt <= 0 &&
+        !isThiefBursting) {
+      _idealLineBannerShown = true;
+      _pulseBanner('Идеальная линия! Вор отстаёт', const Color(0xFF66BB6A));
+      bannerTimer = 1.4;
+    }
+    if (cleanTimer < GameConfig.idealLineWarmupSec) {
+      _idealLineBannerShown = false;
+    }
     _updateThiefEscape(step);
 
     // Chase intro: thief starts on your heels, then drifts to normal lead.
@@ -583,8 +583,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     player.position.y = depth.playerY + _cameraDipY + shakeOffset.y * 0.35;
     player.applyDepthScale(depth.playerScale, step);
     for (final t in _pack) {
-      t.position.y =
-          depth.thiefY + t.depthBias + _cameraDipY + shakeOffset.y * 0.2;
+      t.position.y = depth.thiefY + _cameraDipY + shakeOffset.y * 0.2;
       t.applyDepthScale(depth.thiefScale, step);
     }
 
@@ -606,24 +605,18 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     );
     final closeBehind =
         isThiefBreathing ||
-        (lead.playerLeads &&
-            lead.leadDistance.abs() < GameConfig.thiefBreathLeadMax + 0.4);
-    final sprinting = isPotionBoosting ||
-        isThiefBursting ||
-        (lead.isOvertaking && lead.sprintOvertake);
+        isThiefAtCart ||
+        lead.leadDistance < GameConfig.thiefBreathLeadMax + 0.4;
+    final sprinting = isPotionBoosting || isThiefBursting;
     for (final t in _pack) {
       t.runLane(
         screenCenterX: size.x * 0.5,
         playerX: player.position.x,
         dt: step,
-        overtaking: lead.isOvertaking,
-        overtakeT: lead.overtakeT,
+        pressingCart: isThiefAtCart,
         breathingDownNeck:
-            inChaseIntro ||
-            closeBehind ||
-            isThiefBursting ||
-            (!lead.playerLeads && lead.leadDistance.abs() < 2.2),
-        sprinting: sprinting && t.kind == ThiefKind.primary,
+            inChaseIntro || closeBehind || isThiefBursting,
+        sprinting: sprinting,
       );
     }
 
@@ -655,12 +648,13 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       );
       _spawnUpdate(step);
       _magnetAndCatchUpdate(step);
-      _stealUpdate(step);
+      _clearThiefJewelMagnets();
+      _updateCartBankSteal(step);
       _missUpdate();
       _pollDailyMissions();
     }
 
-    // Endless — no distance finish; ends on pit / escape / forfeit.
+    // Endless — ends on thief checkpoint claim / forfeit (mistakes don't kill).
   }
 
   void _pollDailyMissions() {
@@ -889,9 +883,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
         continue;
       }
 
-      // Jewels: player magnets only while leading (unless powered — above).
-      if (!lead.playerLeads) continue;
-
+      // Jewels: always yours — thief only steals from the cart bank.
       _playerMagnetOrCatch(item, basket, dt);
       if (_pitSucking || finished) return;
     }
@@ -982,93 +974,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     return dx <= halfW && dy <= halfH;
   }
 
-  /// Thief phases through everything except jewels (magnet + steal when ahead).
-  void _stealUpdate(double dt) {
-    // During a burst he snatches even while trailing — rivalry heat.
-    final thiefHuntsJewels =
-        !lead.playerLeads ||
-        isThiefBursting ||
-        (lead.isOvertaking && lead.pendingLeader == Leader.thief);
-
-    if (!thiefHuntsJewels) {
-      for (final item in liveItems) {
-        item.setThiefMagnet(false);
-      }
-      return;
-    }
-
-    for (var i = liveItems.length - 1; i >= 0; i--) {
-      if (i >= liveItems.length || _pitSucking || finished) return;
-      final item = liveItems[i];
-      if (item.collected || item.stolen) continue;
-
-      // Same rule as coins: phase through ALL non-jewels (bars, bombs, junk).
-      if (!item.type.isJewel) {
-        item.setThiefMagnet(false);
-        continue;
-      }
-
-      ThiefComponent? nearest;
-      var bestDistSq = double.infinity;
-      var stealX = 0.0;
-      var stealY = 0.0;
-      for (final t in _pack) {
-        final sx = t.position.x;
-        final sy = t.position.y - t.size.y * 0.72;
-        final ddx = sx - item.hitX;
-        final ddy = sy - item.hitY;
-        final dSq = ddx * ddx + ddy * ddy;
-        if (dSq < bestDistSq) {
-          bestDistSq = dSq;
-          nearest = t;
-          stealX = sx;
-          stealY = sy;
-        }
-      }
-      if (nearest == null) continue;
-
-      final dist = sqrt(bestDistSq);
-      final revenge = !lead.playerLeads;
-      final bursting = isThiefBursting;
-      final stealPow = GameConfig.thiefStealPowerMult(seriesPressure);
-      final radius = (revenge
-              ? GameConfig.thiefRevengeMagnetRadius
-              : (bursting
-                    ? GameConfig.thiefBurstMagnetRadius
-                    : GameConfig.thiefMagnetRadius)) *
-          stealPow;
-      final pullSp = (revenge
-              ? GameConfig.thiefRevengeMagnetPullSpeed
-              : (bursting
-                    ? GameConfig.thiefBurstMagnetPullSpeed
-                    : GameConfig.thiefMagnetPullSpeed)) *
-          stealPow;
-      final stealAt = (revenge
-              ? GameConfig.thiefRevengeStealDist
-              : (bursting ? 26.0 : 22.0)) *
-          (0.92 + 0.16 * seriesPressure);
-
-      // Standing items use feet Y; jewels still need a vertical window vs thief.
-      final itemY = item.standsOnGround ? item.hitY : item.position.y;
-      final inRange =
-          dist < radius &&
-          itemY > nearest.position.y - nearest.size.y * 1.15 &&
-          itemY < nearest.position.y + 48;
-
-      if (inRange) {
-        item.setThiefMagnet(true);
-        final pull = min(pullSp * dt, dist);
-        if (dist > 0.001) {
-          _scratch.setValues(stealX, stealY);
-          _pullToward(item, _scratch, pull);
-        }
-      } else {
-        item.setThiefMagnet(false);
-      }
-
-      if (dist < stealAt) {
-        _thiefSteal(item);
-      }
+  /// Falling jewels are never vacuumed by the thief — only the cart bank is.
+  void _clearThiefJewelMagnets() {
+    for (final item in liveItems) {
+      item.setThiefMagnet(false);
     }
   }
 
@@ -1298,7 +1207,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
   /// Clamp by body edges — center alone still let the sprite clip into bushes.
   double get _playerHalfW =>
-      (started ? player.size.x : GameConfig.playerWidth) * 0.45;
+      (started ? player.size.x : player.baseWidth) * 0.45;
 
   double get _pathMinX =>
       size.x * GameConfig.pathInsetFrac + GameConfig.pathPadPx + _playerHalfW;
@@ -1329,11 +1238,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
           _releaseLiveItem(item);
           continue;
         }
-        // While trailing, jewels belong to the thief — don't punish a miss.
-        if (item.type.isJewel && !lead.playerLeads) {
-          _thiefSteal(item);
-          continue;
-        }
         _breakCoinCombo();
         final nearMiss = (item.position.x - basket.x).abs() < 36;
         stats.player.registerMiss();
@@ -1361,21 +1265,71 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
   }
 
-  /// Mistakes queue chase debt — thief eases closer over time (no rocket pass).
+  /// Mistakes queue chase debt — thief creeps toward the cart (no rocket).
   void _punishMistake(double baseLoss) {
     successStreak = 0;
+    _idealLineBannerShown = false;
     mistakeStreak = (mistakeStreak + 1).clamp(1, 6);
     final extra = (mistakeStreak - 1) * GameConfig.leadLossPerMistakeStreak;
-    // First miss is soft; stacked mistakes still hurt, but capped lower.
-    final add = (baseLoss + extra).clamp(0.0, 1.55);
+    final add = (baseLoss + extra).clamp(0.4, 5.5);
     _leadDebt = (_leadDebt + add).clamp(0.0, GameConfig.leadDebtMax);
-    if (mistakeStreak <= 1) {
-      _pulseBanner('Промах! Вор ближе', const Color(0xFFFF7043));
+    if (mistakeStreak == 1) {
+      _pulseBanner('Промах! Вор ближе…', const Color(0xFFFF7043));
+    } else if (mistakeStreak <= 3) {
+      _pulseBanner('Вор подкрадывается к тележке', const Color(0xFFFF7043));
+    } else {
+      _pulseBanner('Вор почти у тележки!', const Color(0xFFEF5350));
     }
     // Sprint only after a real streak — one slip shouldn't launch him.
     if (mistakeStreak >= GameConfig.thiefBurstFromMistakes) {
       _tryStartThiefBurst(fromMistakes: true);
     }
+  }
+
+  /// Heavy soft-fail (pit / spikes) — big debt dump without ending the run.
+  void _punishMistakeHeavy(double debt) {
+    successStreak = 0;
+    _idealLineBannerShown = false;
+    mistakeStreak = (mistakeStreak + 1).clamp(1, 6);
+    _leadDebt = (_leadDebt + debt).clamp(0.0, GameConfig.leadDebtMax);
+    if (mistakeStreak >= GameConfig.thiefBurstFromMistakes) {
+      _tryStartThiefBurst(fromMistakes: true);
+    }
+  }
+
+  /// Thief near the cart — +1 to his score (takes from your bank, no grab).
+  void _updateCartBankSteal(double dt) {
+    if (!isThiefAtCart) {
+      _cartStealTimer = 0;
+      return;
+    }
+    if (stats.player.rareTotal <= 0) {
+      _cartStealTimer = 0;
+      return;
+    }
+    _cartStealTimer += dt;
+    if (_cartStealTimer < GameConfig.cartStealInterval) return;
+    _cartStealTimer = 0;
+
+    final lost = stats.player.loseOneRareTyped();
+    if (lost == null) return;
+    stats.thief.addItem(lost);
+
+    _breakJewelCombo();
+    unawaited(audio.play('steal'));
+    HapticFeedback.selectionClick();
+    _pulseBanner('Вор рядом · +1', const Color(0xFFEF5350));
+    bannerTimer = 1.0;
+    // Score ping on the thief — he just benefits by being close.
+    final t = thief;
+    add(
+      FloatingText(
+        text: '+1',
+        position: t.position.clone() + Vector2(0, -t.size.y * 0.9),
+        color: const Color(0xFFFF8A65),
+        fontSize: 26,
+      ),
+    );
   }
 
   void _scheduleNextBurst() {
@@ -1512,13 +1466,12 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
   }
 
-  /// Gap to the thief in meters (positive = he is ahead). 0 if you lead.
-  int get thiefGapMeters {
-    if (lead.playerLeads) return 0;
-    return (-lead.leadDistance)
-        .clamp(0.0, -GameConfig.minLeadDistance)
-        .round();
-  }
+  /// Gap behind you in meters (thief never runs ahead).
+  int get thiefBehindMeters =>
+      lead.leadDistance.clamp(0.0, GameConfig.maxLeadDistance).round();
+
+  /// Legacy HUD — always 0 (thief can't pass the cart).
+  int get thiefGapMeters => 0;
 
   /// Clean jewel catches stack — you open a bigger gap behind you.
   void _rewardSuccess(double baseGain, {bool showPullAway = false}) {
@@ -1551,7 +1504,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
           return;
         }
         stats.player.registerCatch(isBomb: true);
-        final lostCrystal = stats.player.loseOneRare();
+        final lostType = stats.player.loseOneRareTyped();
+        if (lostType != null) {
+          stats.thief.addItem(lostType);
+        }
         cleanTimer = 0;
         final leadLoss = item.type.isDynamiteCart
             ? GameConfig.leadLossOnDynamiteCart
@@ -1572,11 +1528,13 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
         );
         add(
           FloatingText(
-            text: lostCrystal
-                ? '−1'
+            text: lostType != null
+                ? '−1 → вор'
                 : (item.type.isDynamiteCart ? 'Вагонетка!' : 'Бум!'),
             position: item.position.clone(),
-            color: lostCrystal ? const Color(0xFFFF5252) : Colors.orangeAccent,
+            color: lostType != null
+                ? const Color(0xFFFF5252)
+                : Colors.orangeAccent,
             fontSize: item.type.isDynamiteCart ? 26 : 22,
           ),
         );
@@ -1612,7 +1570,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
         final spikes = item.type.isSpikes;
         _releaseLiveItem(item);
         if (_tryConsumeHeart(at)) return;
-        _failRunPit(at, fromSpikes: spikes);
+        _softFailFloor(at, fromSpikes: spikes);
         return;
       }
 
@@ -1621,7 +1579,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
           hearts++;
           if (!_taughtHeart) {
             _taughtHeart = true;
-            _pulseBanner('Щит от ямы и шипов!', const Color(0xFFFF5252));
+            _pulseBanner('Щит смягчает удар у тележки!', const Color(0xFFFF5252));
           } else {
             _pulseBanner(
               'Сердце $hearts/${GameConfig.maxHearts}',
@@ -1763,20 +1721,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
     item.collected = true;
 
-    // Power magnet claims jewels even when the thief leads.
-    final thiefOwnsJewel =
-        !hasMagnetPower &&
-        (!lead.playerLeads ||
-            (lead.isOvertaking && lead.pendingLeader == Leader.thief));
-    if (thiefOwnsJewel) {
-      item.collected = false;
-      _thiefSteal(item);
-      return;
-    }
-
     stats.player.addItem(item.type);
     stats.player.registerCatch(isBomb: false);
-    if (lead.playerLeads && item.type.isRare) {
+    if (item.type.isRare) {
       raresWhileLeading += ProgressStore.weekendLeadRareMult;
     }
     _jewelStreak++;
@@ -1785,7 +1732,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     HapticFeedback.selectionClick();
     add(BasketSpark(position: player.basketWorldCenter.clone()));
 
-    // Top HUD reaction — every diamond pickup reads from the top.
+    // Top HUD + cart land juice.
     final youNow = stats.player.rareTotal;
     if (_jewelStreak >= 3) {
       _pulseBanner('◆ ×$_jewelStreak  ·  $youNow', const Color(0xFF81D4FA));
@@ -1795,12 +1742,24 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       bannerTimer = 0.95;
     }
 
-    // Fly a mini diamond toward the top crystal counter (Subway juice).
-    final flyTo = Vector2(size.x * 0.22, 56);
+    // Crystal flies into the cart → +1 pops in the bed as cargo fills.
+    final flyTo = player.basketWorldCenter.clone();
     add(
       DiamondCollectFx(
         from: item.position.clone(),
         to: flyTo,
+        onArrive: () {
+          if (!isMounted || finished) return;
+          player.pulseCargo();
+          add(
+            FloatingText(
+              text: '+1',
+              position: player.basketWorldCenter.clone() + Vector2(0, -18),
+              color: const Color(0xFF81D4FA),
+              fontSize: 22,
+            ),
+          );
+        },
       ),
     );
 
@@ -1846,14 +1805,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
         position: item.position.clone(),
         color: item.type.color,
         count: 12,
-      ),
-    );
-    add(
-      FloatingText(
-        text: '+1 ◆',
-        position: item.position.clone() - Vector2(0, 12),
-        color: const Color(0xFF81D4FA),
-        fontSize: 24,
       ),
     );
     _releaseLiveItem(item);
@@ -1992,6 +1943,8 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _checkpointOpen = true;
     pauseEngine();
     overlays.remove('pause');
+    unawaited(audio.playCheckpoint());
+    HapticFeedback.mediumImpact();
 
     // Always show the tension screen — including thief-ahead defeat beat.
     // Final-round auto-clear only when player already leads/ties.
@@ -2201,60 +2154,56 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     }
   }
 
-  /// Pit / spikes — suck-in cinematic, then results.
-  void _failRunPit(Vector2 pitAt, {bool fromSpikes = false}) {
-    if (finished || _finishBeat || _pitSucking) return;
-    failedRun = true;
-    failedByThiefEscape = false;
-    failedBySpikes = fromSpikes;
-    _pitSucking = true;
-    _pitSuckT = 0;
-    _pitSuckAt = pitAt;
-    _magnetPowerTimer = 0;
-    _webSnareTimer = 0;
-    _playRate = 0.35;
-    _goldStreak = 0;
-    _jewelStreak = 0;
-    dragX = null;
-    player.resetSteer();
+  /// Pit / spikes — soft fail: thief surges toward the cart, crystals spill.
+  void _softFailFloor(Vector2 pitAt, {bool fromSpikes = false}) {
+    if (finished || _finishBeat || _floorStunTimer > 0) return;
+    _floorStunTimer = GameConfig.floorSoftStunSec;
+    _heartIFrame = GameConfig.heartIFrameSec;
+    _breakCoinCombo();
+    _breakJewelCombo();
+    cleanTimer = 0;
+    _punishMistakeHeavy(
+      fromSpikes ? GameConfig.leadLossOnSpikes : GameConfig.leadLossOnPit,
+    );
+
+    // Spill into the thief's pocket — the fight is over the cart bank.
+    final spills = fromSpikes ? 1 : 2;
+    var taken = 0;
+    for (var i = 0; i < spills; i++) {
+      final lost = stats.player.loseOneRareTyped();
+      if (lost == null) break;
+      stats.thief.addItem(lost);
+      taken++;
+    }
+
     audio.play('bomb');
     _hitJuiceLethal(spikes: fromSpikes);
     _pulseBanner(
-      fromSpikes ? 'Шипы!' : 'Яма!',
+      taken > 0
+          ? (fromSpikes
+              ? 'Шипы! −$taken ◆ · вор у тележки'
+              : 'Яма! −$taken ◆ · вор рвётся к тележке')
+          : (fromSpikes
+              ? 'Шипы! Вор ближе к тележке'
+              : 'Яма! Вор рвётся к тележке'),
       fromSpikes ? const Color(0xFFFF8A65) : const Color(0xFFEF5350),
     );
-    for (final e in List<FallingItem>.of(liveItems)) {
-      _releaseLiveItem(e);
-    }
-    liveItems.clear();
-    unawaited(_commitDailyProgress());
-  }
-
-  void _updatePitSuck(double dt) {
-    _pitSuckT += dt;
-    final dur = GameConfig.pitSuckDuration;
-    final t = Curves.easeInCubic.transform((_pitSuckT / dur).clamp(0.0, 1.0));
-    final pit = _pitSuckAt ?? player.position;
-    // Pull toward the hole and shrink — “засос”.
-    player.position.x +=
-        (pit.x - player.position.x) * (1 - (1 / (1 + 14 * dt)));
-    player.position.y += (pit.y + 8 - player.position.y) * (0.08 + t * 0.55);
-    final s = (1.0 - t * 0.92).clamp(0.06, 1.0);
-    player.scale = Vector2.all(s);
-    player.angle = t * 1.15;
-    player.opacity = (1.0 - t * 0.85).clamp(0.0, 1.0);
-    background.scroll += background.speed * dt * 0.25;
-
-    if (_pitSuckT >= dur) {
-      _pitSucking = false;
-      finished = true;
-      _playRate = 1;
-      player.scale = Vector2.all(1);
-      player.angle = 0;
-      player.opacity = 1;
-      pauseEngine();
-      overlays.add('results');
-    }
+    bannerTimer = 1.4;
+    add(
+      FloatingText(
+        text: taken > 0 ? '−$taken ◆' : '!',
+        position: pitAt.clone(),
+        color: const Color(0xFFFF5252),
+        fontSize: 26,
+      ),
+    );
+    add(
+      ParticleBurst(
+        position: pitAt.clone(),
+        color: fromSpikes ? const Color(0xFFFF8A65) : const Color(0xFFB71C1C),
+        count: 14,
+      ),
+    );
   }
 
   /// +1 normally; every 10th gold in a streak pops +10 (Subway juice).
@@ -2264,44 +2213,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       return next > 0 && next % 10 == 0 ? '+10' : '+1';
     }
     return type.popupLabel;
-  }
-
-  void _thiefSteal(FallingItem item) {
-    if (item.stolen || item.collected) return;
-    // Only jewels — same phase-through rule as coins for everything else.
-    if (!item.type.isJewel) return;
-    item.stolen = true;
-    stats.thief.addItem(item.type);
-    _breakJewelCombo();
-    audio.play('steal');
-    final revenge = !lead.playerLeads;
-    add(
-      ScreenFlash(
-        color: const Color(0xFFEF5350),
-        peakAlpha: revenge ? 0.22 : 0.14,
-        duration: revenge ? 0.38 : 0.3,
-      ),
-    );
-    _shake(revenge ? 14.0 : 11.0);
-    add(
-      ParticleBurst(
-        position: item.position.clone(),
-        color: const Color(0xFFFF1744),
-        count: revenge ? 16 : 12,
-      ),
-    );
-    add(
-      FloatingText(
-        text: revenge ? 'Украл!' : '+1',
-        position: item.position.clone(),
-        color: const Color(0xFFFF5252),
-        fontSize: revenge ? 24 : 22,
-      ),
-    );
-    if (revenge) {
-      _pulseBanner('Вор забирает!', const Color(0xFFEF5350));
-    }
-    _releaseLiveItem(item);
   }
 
   /// Pause for in-run menu sheet.
@@ -2429,6 +2340,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _breathFlashTimer = 0;
     _breathBannerCd = 0;
     _wasBreathing = false;
+    _cartStealTimer = 0;
+    _floorStunTimer = 0;
+    _idealLineBannerShown = false;
     _webSnareTimer = 0;
     _magnetPowerTimer = 0;
     hearts = 0;
@@ -2481,8 +2395,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _thiefEscapeTimer = 0;
     _thiefEscapeBannerCd = 0;
     _pitSucking = false;
-    _pitSuckT = 0;
-    _pitSuckAt = null;
     _introT = 0;
     _finishBeat = false;
     _finishBeatTimer = 0;
@@ -2497,7 +2409,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     AssetLibrary.applyCorridorJewels(0);
     pool.clearJewels();
     pool.clearHazards();
-    _clearExtraThieves();
     player.scale = Vector2.all(1);
     player.angle = 0;
     player.opacity = 1;
@@ -2508,37 +2419,6 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _layoutActors();
     _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
     resumeEngine();
-  }
-
-  void _clearExtraThieves() {
-    thiefBlue?.removeFromParent();
-    thiefBlue = null;
-  }
-
-  /// Long mode = 2 thieves from the start; Standard = one.
-  void _syncExtraThieves() {
-    final wantBlue = GameSettings.instance.runMode.thiefCount >= 2;
-
-    if (wantBlue && thiefBlue == null) {
-      final t = ThiefComponent(kind: ThiefKind.blue);
-      thiefBlue = t;
-      // ignore: discarded_futures
-      _mountBlueThief(t);
-    } else if (!wantBlue && thiefBlue != null) {
-      thiefBlue!.removeFromParent();
-      thiefBlue = null;
-    }
-  }
-
-  Future<void> _mountBlueThief(ThiefComponent t) async {
-    await add(t);
-    if (!isMounted || thiefBlue != t) return;
-    final depth = lead.depthPositions(screenHeight: size.y);
-    t.position = Vector2(size.x * 0.5 + t.laneBias, depth.thiefY + t.depthBias);
-    t.applyDepthScale(depth.thiefScale);
-    if (!inChaseIntro) {
-      _pulseBanner('Двое воров!', const Color(0xFF42A5F5));
-    }
   }
 
   void _syncCorridorTheme() {

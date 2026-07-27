@@ -13,13 +13,7 @@ class ShopCatalog {
   static const int starterCrystals = 300;
 
   /// Paid skins only — free skins are not listed for purchase.
-  static const Map<String, int> skinPrices = {
-    'ninja': 500,
-    'robot': 1200,
-    'monkey': 2500,
-    'pingvin': 5000,
-    'mag': 8000,
-  };
+  static const Map<String, int> skinPrices = {};
 
   static int? skinPrice(String id) => skinPrices[id];
 

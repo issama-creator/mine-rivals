@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Catalog of playable miner skins (9×2 run sheets).
+/// Catalog of playable miner skins.
 class PlayerSkin {
   const PlayerSkin({
     required this.id,
@@ -8,6 +8,10 @@ class PlayerSkin {
     required this.sheetAsset,
     required this.previewAsset,
     required this.accent,
+    this.columns = 9,
+    this.rows = 2,
+    this.cartStyle = false,
+    this.topDown = false,
   });
 
   final String id;
@@ -17,62 +21,35 @@ class PlayerSkin {
 
   /// Theme color for skin-picker card border / label.
   final Color accent;
+
+  /// Sprite sheet grid (legacy 9×2; top-down cart pushers 6×4).
+  final int columns;
+  final int rows;
+
+  /// Cart runner — cargo bed is the catch / fill focus.
+  final bool cartStyle;
+
+  /// True top-down sheet (cart ahead of miner toward top of frame).
+  final bool topDown;
 }
 
 class PlayerSkins {
   PlayerSkins._();
 
-  static const String defaultId = 'player';
+  /// Default = p5 (main cart pusher).
+  static const String defaultId = 'p5';
 
   static const List<PlayerSkin> all = [
     PlayerSkin(
-      id: 'player',
+      id: 'p5',
       nameRu: 'Шахтёр',
-      sheetAsset: 'assets/images/skins/player.png',
-      previewAsset: 'assets/images/skins/preview/player.png',
-      accent: Color(0xFF7CB342), // olive green shirt
-    ),
-    PlayerSkin(
-      id: 'woman',
-      nameRu: 'Шахтёрша',
-      sheetAsset: 'assets/images/skins/woman.png',
-      previewAsset: 'assets/images/skins/preview/woman.png',
-      accent: Color(0xFFEC407A), // pink shirt
-    ),
-    PlayerSkin(
-      id: 'ninja',
-      nameRu: 'Ниндзя',
-      sheetAsset: 'assets/images/skins/ninja.png',
-      previewAsset: 'assets/images/skins/preview/ninja.png',
-      accent: Color(0xFFE53935), // red sash
-    ),
-    PlayerSkin(
-      id: 'robot',
-      nameRu: 'Робот',
-      sheetAsset: 'assets/images/skins/robot.png',
-      previewAsset: 'assets/images/skins/preview/robot.png',
-      accent: Color(0xFF40C4FF), // neon blue glow
-    ),
-    PlayerSkin(
-      id: 'monkey',
-      nameRu: 'Обезьяна',
-      sheetAsset: 'assets/images/skins/monkey.png',
-      previewAsset: 'assets/images/skins/preview/monkey.png',
-      accent: Color(0xFFD17A3A), // warm brown fur
-    ),
-    PlayerSkin(
-      id: 'pingvin',
-      nameRu: 'Пингвин',
-      sheetAsset: 'assets/images/skins/pingvin.png',
-      previewAsset: 'assets/images/skins/preview/pingvin.png',
-      accent: Color(0xFF4DD0E1), // icy cyan
-    ),
-    PlayerSkin(
-      id: 'mag',
-      nameRu: 'Маг',
-      sheetAsset: 'assets/images/skins/mag.png',
-      previewAsset: 'assets/images/skins/preview/mag.png',
-      accent: Color(0xFF7E57C2), // indigo robe
+      sheetAsset: 'assets/images/skins/p5.png',
+      previewAsset: 'assets/images/skins/preview/p5.png',
+      accent: Color(0xFFFFB300),
+      columns: 6,
+      rows: 4,
+      cartStyle: true,
+      topDown: true,
     ),
   ];
 
