@@ -28,6 +28,7 @@ import '../thief/thief_component.dart';
 import '../world/parallax_background.dart';
 import 'asset_library.dart';
 import 'game_config.dart';
+import 'player_skins.dart';
 
 class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   MineRivalsGame({this.onFinished, this.onQuitToMenu});
@@ -110,6 +111,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   double _webSnareTimer = 0;
 
   bool get isWebSnared => _webSnareTimer > 0;
+
+  bool get _playerTopDown =>
+      PlayerSkins.byId(GameSettings.instance.selectedSkinId).topDown;
 
   /// Subway-style magnet power-up — pulls loot (not bomb/web).
   double _magnetPowerTimer = 0;
@@ -279,21 +283,8 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     } catch (e, st) {
       // ignore: avoid_print
       print('Asset boot retry: $e\n$st');
-      try {
-        await AssetLibrary.ensureLoaded(prefetchRest: false);
-      } catch (e2, st2) {
-        // ignore: avoid_print
-        print('Asset boot failed: $e2\n$st2');
-        // Last resort — do not hang forever on GameLoadingScreen.
-        await Future<void>.delayed(const Duration(milliseconds: 80));
-        try {
-          await AssetLibrary.ensureLoaded(prefetchRest: false);
-        } catch (e3, st3) {
-          // ignore: avoid_print
-          print('Asset boot aborted: $e3\n$st3');
-          return;
-        }
-      }
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await AssetLibrary.ensureLoaded(prefetchRest: false);
     }
     if (!AssetLibrary.ready) {
       // ignore: avoid_print
@@ -325,8 +316,13 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
     started = true;
     unawaited(_applyShopLoadout());
-    // Heavy corridor decode after the first frame is up.
-    AssetLibrary.startBackgroundPrefetch();
+    // Defer corridor prefetch — right after boot it fights hot restart / GC.
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 5), () {
+        if (!started || finished) return;
+        AssetLibrary.startBackgroundPrefetch();
+      }),
+    );
     if (!ProgressStore.instance.tutorialSeen) {
       overlays.add('tutorial');
       pauseEngine();
@@ -579,12 +575,21 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     final maxDip = size.y * 0.94 - depth.playerY;
     if (_cameraDipY > maxDip) _cameraDipY = max(0, maxDip);
 
-    // Straight run — no idle bob; only screen-shake + speed look-ahead.
-    player.position.y = depth.playerY + _cameraDipY + shakeOffset.y * 0.35;
+    // Top-down sprites: keep Y locked — shake/dip on Y reads as hopping.
+    final topDownPlant = player.topDown;
+    final dipY = topDownPlant ? 0.0 : _cameraDipY;
+    final shakeY = topDownPlant ? 0.0 : shakeOffset.y;
+    player.position.y = depth.playerY + dipY + shakeY * 0.35;
     player.applyDepthScale(depth.playerScale, step);
     for (final t in _pack) {
-      t.position.y = depth.thiefY + _cameraDipY + shakeOffset.y * 0.2;
+      t.position.y = depth.thiefY + dipY + shakeY * 0.2;
       t.applyDepthScale(depth.thiefScale, step);
+    }
+    if (isThiefAtCart) {
+      // Same row as the miner — reads as shoulder-to-shoulder at the cart.
+      for (final t in _pack) {
+        t.position.y = player.position.y;
+      }
     }
 
     final minX = _pathMinX;
@@ -624,8 +629,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _updateFarGapBanners(step);
     _updateDrawOrder();
 
+    // Top-down cart: no foot dust puffs — they read as random flashes.
     dustTimer += step;
-    if (dustTimer > 0.45) {
+    if (!_playerTopDown && dustTimer > 0.45) {
       dustTimer = 0;
       if (_dustLive < 3) {
         _dustLive++;
@@ -1318,6 +1324,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _breakJewelCombo();
     unawaited(audio.play('steal'));
     HapticFeedback.selectionClick();
+    thief.pulseBedCargo();
     _pulseBanner('Вор рядом · +1', const Color(0xFFEF5350));
     bannerTimer = 1.0;
     // Score ping on the thief — he just benefits by being close.
@@ -1742,8 +1749,8 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
       bannerTimer = 0.95;
     }
 
-    // Crystal flies into the cart → +1 pops in the bed as cargo fills.
-    final flyTo = player.basketWorldCenter.clone();
+    // Crystal flies into the cart bed (inside the brown box).
+    final flyTo = player.cartBedWorldCenter.clone();
     add(
       DiamondCollectFx(
         from: item.position.clone(),

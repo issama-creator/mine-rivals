@@ -8,10 +8,20 @@ import 'game_settings.dart';
 /// Soft audio layer — uses assets when present, otherwise system clicks + haptics.
 class AudioManager {
   bool _assetsReady = false;
+  Future<void>? _initFuture;
+
+  /// Short sfx players — must be disposed or they pile up and stall hot restart.
+  static const _maxSfxPlayers = 8;
+  final List<AudioPlayer> _sfx = [];
 
   bool get enabled => GameSettings.instance.soundEnabled;
 
-  Future<void> init() async {
+  Future<void> init() {
+    _initFuture ??= _initOnce();
+    return _initFuture!;
+  }
+
+  Future<void> _initOnce() async {
     try {
       await FlameAudio.audioCache.loadAll([
         'catch.wav',
@@ -32,7 +42,6 @@ class AudioManager {
     if (!enabled) return;
     _haptic(key);
     if (_assetsReady) {
-      // Fire-and-forget — awaiting audio stalls the frame on catch spam.
       unawaited(_playAsset(key));
       return;
     }
@@ -48,11 +57,9 @@ class AudioManager {
     }
   }
 
-  /// Finish sting — win feels brighter than loss (same assets, different key).
   Future<void> playFinish({required bool won}) =>
       play(won ? 'combo' : 'miss');
 
-  /// Coin streak pitch-up — each catch a bit higher (Subway-style combo feel).
   Future<void> playCatchPitched(double pitch) async {
     if (!enabled) return;
     _haptic('catch');
@@ -63,7 +70,6 @@ class AudioManager {
     unawaited(_playAssetPitched('catch', pitch.clamp(0.92, 1.55)));
   }
 
-  /// Thief laugh when looting the cart — steal sting, a bit lower.
   Future<void> playStealLaugh() async {
     if (!enabled) return;
     _haptic('steal');
@@ -78,19 +84,40 @@ class AudioManager {
     }));
   }
 
-  /// Checkpoint sting — bright tally feel.
   Future<void> playCheckpoint() => play('combo');
 
   Future<void> _playAsset(String key) async {
-    try {
-      await FlameAudio.play('$key.wav', volume: 0.55);
-    } catch (_) {}
+    await _playAssetPitched(key, 1.0);
   }
 
   Future<void> _playAssetPitched(String key, double pitch) async {
     try {
+      await _trimSfx();
       final player = await FlameAudio.play('$key.wav', volume: 0.55);
-      await player.setPlaybackRate(pitch);
+      _sfx.add(player);
+      if (pitch != 1.0) {
+        await player.setPlaybackRate(pitch);
+      }
+      player.onPlayerComplete.listen((_) {
+        unawaited(_disposePlayer(player));
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _trimSfx() async {
+    _sfx.removeWhere((p) {
+      final s = p.state;
+      return s == PlayerState.stopped || s == PlayerState.completed;
+    });
+    while (_sfx.length >= _maxSfxPlayers) {
+      await _disposePlayer(_sfx.removeAt(0));
+    }
+  }
+
+  Future<void> _disposePlayer(AudioPlayer player) async {
+    _sfx.remove(player);
+    try {
+      await player.dispose();
     } catch (_) {}
   }
 

@@ -1,10 +1,13 @@
 import 'package:flame/components.dart';
+import 'package:flutter/material.dart';
 
-import '../effects/ground_shadow.dart';
+import '../effects/wheel_dust.dart';
 import '../game/asset_library.dart';
 import '../game/game_config.dart';
+import '../game/mine_rivals_game.dart';
 import '../game/player_skins.dart';
 import '../systems/game_settings.dart';
+import 'cart_bed_cargo.dart';
 import 'cart_cargo_glow.dart';
 
 class PlayerComponent extends SpriteAnimationComponent {
@@ -15,18 +18,23 @@ class PlayerComponent extends SpriteAnimationComponent {
           priority: 20,
         );
 
-  late GroundShadow _shadow;
   CartCargoGlow? _cargo;
+  CartBedCargoLayer? _bedCargo;
   double targetX = 0;
   double _displayScale = 1;
   double _animRate = 1;
   double _animRateTarget = 1;
+  double _wheelDustCd = 0;
+  int _wheelDustLive = 0;
 
-  /// Lateral velocity — makes left/right feel smooth and responsive.
   double _steerVx = 0;
 
-  /// Cached basket point — refreshed once per catch tick (no alloc).
   final Vector2 basketCenter = Vector2.zero();
+
+  static final Paint _shadowOuter =
+      Paint()..color = Colors.black.withValues(alpha: 0.38);
+  static final Paint _shadowInner =
+      Paint()..color = Colors.black.withValues(alpha: 0.20);
 
   bool get _cartStyle =>
       PlayerSkins.byId(GameSettings.instance.selectedSkinId).cartStyle;
@@ -34,25 +42,30 @@ class PlayerComponent extends SpriteAnimationComponent {
   bool get _topDown =>
       PlayerSkins.byId(GameSettings.instance.selectedSkinId).topDown;
 
+  /// Public for camera plant (top-down locks Y shake/dip).
+  bool get topDown => _topDown;
+
   double get baseWidth =>
       _cartStyle ? GameConfig.playerCartWidth : GameConfig.playerWidth;
 
   double get baseHeight =>
       _cartStyle ? GameConfig.playerCartHeight : GameConfig.playerHeight;
 
-  /// Shadow sits under the boots (sheet has empty pad below feet).
-  double get _shadowY =>
-      _topDown ? size.y * 0.90 : size.y - 2;
-
-  double get _shadowH =>
-      _topDown ? size.y * 0.085 : size.y * 0.11;
-
-  /// Approx catch focus in world space.
   void refreshBasketCenter() {
-    // Top-down: cart ahead (upper on sprite). Back-view cart: mid bed.
-    // Upright skins: head basket.
-    final yFrac = _cartStyle ? (_topDown ? 0.68 : 0.42) : 0.88;
+    final yFrac =
+        _cartStyle ? (_topDown ? CartBedCargoLayer.bedYFracFromFeet : 0.42) : 0.88;
     basketCenter.setValues(position.x, position.y - size.y * yFrac);
+  }
+
+  Vector2 get cartBedWorldCenter {
+    if (!_topDown || !_cartStyle) {
+      refreshBasketCenter();
+      return basketCenter;
+    }
+    return Vector2(
+      position.x,
+      position.y - size.y * CartBedCargoLayer.bedYFracFromFeet,
+    );
   }
 
   Vector2 get basketWorldCenter {
@@ -62,26 +75,69 @@ class PlayerComponent extends SpriteAnimationComponent {
 
   void setRunAnimRate(double rate) {
     if (_topDown || _cartStyle) {
-      // Pace barely speeds the walk — keeps a calm step.
       _animRateTarget =
-          (0.72 + rate * 0.18).clamp(0.72, GameConfig.minerCartAnimRateMax);
+          (0.62 + rate * 0.14).clamp(0.62, GameConfig.minerCartAnimRateMax);
       return;
     }
     _animRateTarget = rate.clamp(0.95, 3.0);
   }
 
-  /// Clear lateral inertia (restart / pit suck).
   void resetSteer() {
     _steerVx = 0;
     angle = 0;
   }
 
   @override
+  void render(Canvas canvas) {
+    _paintFeetShadow(canvas);
+    super.render(canvas);
+    final bed = _bedCargo;
+    final game = findGame();
+    if (bed != null && game is MineRivalsGame) {
+      bed.paint(canvas, this, game, animationTicker?.currentIndex ?? 0);
+    }
+  }
+
+  void _paintFeetShadow(Canvas canvas) {
+    final w = size.x * (_topDown ? 0.50 : (_cartStyle ? 0.88 : 0.78));
+    final h = _topDown ? size.y * 0.085 : size.y * 0.11;
+    final cy = _topDown ? size.y * 0.935 : size.y - 2;
+    final cx = size.x * 0.5;
+    final c = Offset(cx, cy);
+    canvas.drawOval(Rect.fromCenter(center: c, width: w, height: h), _shadowOuter);
+    canvas.drawOval(
+      Rect.fromCenter(center: c, width: w * 0.7, height: h * 0.65),
+      _shadowInner,
+    );
+  }
+
+  @override
   void update(double dt) {
-    // Ease stride rate — kills choppy jumps when pace steps up.
     final follow = 1 - (1 / (1 + 6.5 * dt));
     _animRate += (_animRateTarget - _animRate) * follow;
     super.update(dt * _animRate);
+    final bed = _bedCargo;
+    if (bed != null && bed.pulse > 0) {
+      bed.pulse = (bed.pulse - dt * 2.6).clamp(0.0, 1.0);
+    }
+    _emitWheelDust(dt);
+  }
+
+  void _emitWheelDust(double dt) {
+    if (!_topDown) return;
+    final parent = this.parent;
+    if (parent == null) return;
+    _wheelDustCd -= dt;
+    if (_wheelDustCd > 0 || _wheelDustLive >= 2) return;
+    _wheelDustCd = 0.20;
+    _wheelDustLive++;
+    final ahead = position + Vector2(0, -size.y * 0.58);
+    parent.add(
+      WheelDust(
+        position: ahead,
+        onDone: () => _wheelDustLive = (_wheelDustLive - 1).clamp(0, 8),
+      ),
+    );
   }
 
   @override
@@ -93,18 +149,14 @@ class PlayerComponent extends SpriteAnimationComponent {
     playing = true;
     size.setValues(baseWidth, baseHeight);
 
-    _shadow = GroundShadow();
-    _shadow.size = Vector2(size.x * (_cartStyle ? 0.78 : 0.78), _shadowH);
-    _shadow.position = Vector2(size.x * 0.5, _shadowY);
-    await add(_shadow);
-
-    if (_cartStyle) {
+    if (_cartStyle && _topDown) {
+      _bedCargo = CartBedCargoLayer(forThief: false);
+    } else if (_cartStyle && !_topDown) {
       _cargo = CartCargoGlow();
       await add(_cargo!);
     }
   }
 
-  /// Smooth velocity follow toward finger X — pleasant arc, still dodge-ready.
   void moveToward(
     double x,
     double minX,
@@ -147,7 +199,6 @@ class PlayerComponent extends SpriteAnimationComponent {
       _steerVx *= 0.18 + 0.27 * feel;
     }
 
-    // Top-down sheets stay upright — lean reads as “колбасит”.
     if (_topDown) {
       angle = 0;
       return;
@@ -158,19 +209,18 @@ class PlayerComponent extends SpriteAnimationComponent {
   }
 
   void applyDepthScale(double scale, [double dt = 1 / 60]) {
-    if (dt >= 0.2) {
+    if (_topDown) {
+      _displayScale = scale;
+    } else if (dt >= 0.2) {
       _displayScale = scale;
     } else {
       _displayScale += (scale - _displayScale) * (1 - (1 / (1 + 10 * dt)));
     }
     size.setValues(baseWidth * _displayScale, baseHeight * _displayScale);
-    _shadow.size.setValues(
-      size.x * (_topDown ? 0.72 : (_cartStyle ? 0.88 : 0.78)),
-      _shadowH,
-    );
-    _shadow.position.setValues(size.x * 0.5, _shadowY);
   }
 
-  /// Cargo bed bounce when a crystal lands.
-  void pulseCargo() => _cargo?.pulse();
+  void pulseCargo() {
+    _cargo?.pulse();
+    _bedCargo?.pulse = 1;
+  }
 }

@@ -45,7 +45,7 @@ class AssetLibrary {
 
   /// Per-corridor jewel sets — unused; one global diamond for all shafts.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 69;
+  static const int _assetVersion = 76;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
@@ -303,6 +303,7 @@ class AssetLibrary {
       columns: GameConfig.thiefSheetColumns,
       rows: GameConfig.thiefSheetRows,
       stepTime: 1 / GameConfig.thiefRunFps,
+      walkRows: 1,
     );
   }
 
@@ -380,6 +381,7 @@ class AssetLibrary {
                 (skin.cartStyle
                     ? GameConfig.minerCartRunFps
                     : GameConfig.minerRunFps),
+            walkRows: skin.topDown ? 1 : null,
           );
         } else {
           skinRuns[skin.id] = await _sliceRunAnimationStabilized(
@@ -396,17 +398,20 @@ class AssetLibrary {
     }();
   }
 
-  /// Even grid slice (full sheet, all cells) — used by cart miner 5×4.
+  /// Even grid slice. [walkRows] limits to the first N rows (top-down walk
+  /// cycle) so we don't animate every facing / outlier cell and hop.
   static SpriteAnimation _sliceSimpleGrid(
     ui.Image image, {
     required int columns,
     required int rows,
     required double stepTime,
+    int? walkRows,
   }) {
     final frameW = image.width / columns;
     final frameH = image.height / rows;
+    final rowLimit = (walkRows ?? rows).clamp(1, rows);
     final frames = <Sprite>[];
-    for (var row = 0; row < rows; row++) {
+    for (var row = 0; row < rowLimit; row++) {
       for (var col = 0; col < columns; col++) {
         frames.add(
           Sprite(

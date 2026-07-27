@@ -130,8 +130,8 @@ class ParallaxBackground extends PositionComponent {
     // Integer tile size so joins land on pixel boundaries.
     final tileW = size.x.roundToDouble();
     final tileH = math.max(8, (srcH * (tileW / srcW)).round()).toDouble();
-    // Slight overlap hides residual loop seam after BG edge crossfade.
-    const seamOverlap = 8.0;
+    // Larger overlap + soft BG edge bake hide the tile loop join.
+    const seamOverlap = 14.0;
     final period = math.max(8.0, tileH - seamOverlap);
     // Pixel-snap scroll so the join doesn't smear between rows.
     final offset = (scroll % period).floorToDouble();

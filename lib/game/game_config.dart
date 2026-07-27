@@ -178,17 +178,17 @@ class GameConfig {
 
   static const double playerWidth = 66;
   static const double playerHeight = 128;
-  /// Top-down cart pusher — cells are tall (cart above, miner below).
-  static const double playerCartWidth = 104;
-  static const double playerCartHeight = 116;
+  /// Top-down cart pusher — slightly larger so the bed reads on the path.
+  static const double playerCartWidth = 114;
+  static const double playerCartHeight = 128;
   /// Thief same pose, ~12% smaller so the hero reads as primary.
-  static const double thiefWidth = 92;
-  static const double thiefHeight = 102;
+  static const double thiefWidth = 100;
+  static const double thiefHeight = 112;
   /// Top-down vor sheet — clean 6×4 (24 frames).
   static const int thiefSheetColumns = 6;
   static const int thiefSheetRows = 4;
   /// Slow walk cycle — readable stride, not a leg twitch.
-  static const int thiefRunFps = 10;
+  static const int thiefRunFps = 8;
   /// Slight boost over depth scale — keep the miner readable, not oversized.
   static const double playerHeroScale = 1.0;
 
@@ -463,13 +463,13 @@ class GameConfig {
   static const double chaseIntroSec = 2.35;
 
   /// Walkable stone path inset from each screen edge (player steering).
-  /// ~0.247 → path ~50.6% wide (~10% wider than the old 0.46 band).
-  static const double pathInsetFrac = 0.247;
+  /// Path art widened ~10% → playable band ~55.6% (inset 0.222).
+  static const double pathInsetFrac = 0.222;
   /// Extra padding inside the path so sprites don't kiss the rock edge.
   static const double pathPadPx = 6;
 
   /// Normal loot/bombs: center band scaled with the wider path.
-  static const double spawnInsetFrac = 0.258;
+  static const double spawnInsetFrac = 0.235;
   /// Rare “in the bushes” spawn near the wall ice (still on path edge).
   static const double bushSpawnChance = 0.14;
   static const double bushInsetFrac = 0.17;
@@ -502,6 +502,8 @@ class GameConfig {
   static const double thiefAheadScale = 0.72;
 
   static const double thiefLaneOffsetX = 44;
+  /// Beside the miner when draining the cart bank.
+  static const double thiefCartPressOffsetX = 54;
   static const double thiefPassExtraX = 58;
   static const double thiefMinClearanceX = 56;
 
@@ -509,8 +511,8 @@ class GameConfig {
   /// Upright skins — classic stride.
   static const int minerRunFps = 15;
   /// Cart / top-down sheets — slow deliberate push stride.
-  static const int minerCartRunFps = 10;
+  static const int minerCartRunFps = 8;
   /// Soft ceiling so late-run pace doesn't skip frames.
-  static const double minerCartAnimRateMax = 1.15;
+  static const double minerCartAnimRateMax = 1.05;
   static const int runFrames = 18;
 }

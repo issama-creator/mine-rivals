@@ -13,7 +13,7 @@ class DiamondCollectFx extends SpriteComponent {
     this.onArrive,
   }) : super(
           position: from.clone(),
-          size: Vector2(28, 35),
+          size: Vector2(18, 22),
           anchor: Anchor.center,
           priority: 120,
         ) {
@@ -28,10 +28,10 @@ class DiamondCollectFx extends SpriteComponent {
   Future<void> onLoad() async {
     await super.onLoad();
     sprite = AssetLibrary.items[ItemType.diamond];
-    scale = Vector2.all(0.55);
+    scale = Vector2.all(0.45);
     add(
       ScaleEffect.to(
-        Vector2.all(1.15),
+        Vector2.all(0.85),
         EffectController(duration: 0.12, curve: Curves.easeOutBack),
       ),
     );
@@ -48,7 +48,7 @@ class DiamondCollectFx extends SpriteComponent {
     );
     add(
       ScaleEffect.to(
-        Vector2.all(0.32),
+        Vector2.all(0.22),
         EffectController(duration: 0.48, curve: Curves.easeIn),
       ),
     );
