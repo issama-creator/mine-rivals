@@ -1086,7 +1086,7 @@ class _PlayerMetaChip extends StatelessWidget {
 
   final VoidCallback onWalletTap;
 
-  static const _gemAsset = 'assets/images/items/diamond.png';
+  static const _gemAsset = 'assets/images/items/almaz.png';
 
   @override
   Widget build(BuildContext context) {

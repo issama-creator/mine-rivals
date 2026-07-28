@@ -75,8 +75,8 @@ class PlayerComponent extends SpriteAnimationComponent {
 
   void setRunAnimRate(double rate) {
     if (_topDown || _cartStyle) {
-      _animRateTarget =
-          (0.62 + rate * 0.14).clamp(0.62, GameConfig.minerCartAnimRateMax);
+      // Steady stride — no speed wobble (that read as sideways shake).
+      _animRateTarget = 1.0;
       return;
     }
     _animRateTarget = rate.clamp(0.95, 3.0);
@@ -99,9 +99,10 @@ class PlayerComponent extends SpriteAnimationComponent {
   }
 
   void _paintFeetShadow(Canvas canvas) {
-    final w = size.x * (_topDown ? 0.50 : (_cartStyle ? 0.88 : 0.78));
-    final h = _topDown ? size.y * 0.085 : size.y * 0.11;
-    final cy = _topDown ? size.y * 0.935 : size.y - 2;
+    final w = size.x * (_topDown ? 0.42 : (_cartStyle ? 0.88 : 0.78));
+    final h = _topDown ? size.y * 0.055 : size.y * 0.11;
+    // Flush with boots (sprite feet are at the bottom edge of the cell).
+    final cy = _topDown ? size.y - 1.0 : size.y - 2;
     final cx = size.x * 0.5;
     final c = Offset(cx, cy);
     canvas.drawOval(Rect.fromCenter(center: c, width: w, height: h), _shadowOuter);

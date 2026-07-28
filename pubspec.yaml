@@ -66,10 +66,13 @@ flutter:
     - assets/audio/
     - assets/images/bgc/
     - assets/images/items/diamond.png
+    - assets/images/items/almaz.png
     - assets/images/hazards/
     - assets/images/vors/
     # Skins — listed explicitly (directory entries can miss on some rebuilds).
+    - assets/images/skins/player.png
     - assets/images/skins/p5.png
+    - assets/images/skins/preview/player.png
     - assets/images/skins/preview/p5.png
 
   # An image asset can refer to one or more resolution-specific "variants", see

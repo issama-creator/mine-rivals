@@ -43,9 +43,12 @@ class AssetLibrary {
   ];
   static final Map<ItemType, Sprite> items = {};
 
+  /// Cart-bed gem (almaz.png) — separate from falling diamond catchables.
+  static Sprite? cartGem;
+
   /// Per-corridor jewel sets — unused; one global diamond for all shafts.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 76;
+  static const int _assetVersion = 81;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
@@ -173,6 +176,7 @@ class AssetLibrary {
     tunnel = null;
     corridors.clear();
     corridorJewels.clear();
+    cartGem = null;
     _corridorLoaded.fillRange(0, _corridorLoaded.length, false);
     _universalDiamondLoaded = false;
 
@@ -346,18 +350,25 @@ class AssetLibrary {
     if (i == 0) tunnel = sprite;
   }
 
-  /// One shared diamond for every jewel type on every shaft.
+  /// One shared almaz gem for falling jewels + cart bed cargo.
   static Future<void> _loadUniversalDiamond() async {
     if (_universalDiamondLoaded && items.containsKey(ItemType.diamond)) {
       return;
     }
-    final img = await _loadImage('assets/images/items/diamond.png');
-    final sprite = Sprite(img);
+    Sprite sprite;
+    try {
+      final almaz = await _loadImage('assets/images/items/almaz.png');
+      sprite = Sprite(almaz);
+    } catch (_) {
+      final img = await _loadImage('assets/images/items/diamond.png');
+      sprite = Sprite(img);
+    }
     items[ItemType.diamond] = sprite;
     items[ItemType.ruby] = sprite;
     items[ItemType.emerald] = sprite;
     items[ItemType.amethyst] = sprite;
     items[ItemType.legendary] = sprite;
+    cartGem = sprite;
     corridorJewels
       ..clear()
       ..add([sprite, sprite, sprite, sprite, sprite]);
@@ -381,7 +392,7 @@ class AssetLibrary {
                 (skin.cartStyle
                     ? GameConfig.minerCartRunFps
                     : GameConfig.minerRunFps),
-            walkRows: skin.topDown ? 1 : null,
+            walkRows: skin.walkRows,
           );
         } else {
           skinRuns[skin.id] = await _sliceRunAnimationStabilized(

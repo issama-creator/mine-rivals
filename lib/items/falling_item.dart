@@ -13,11 +13,11 @@ enum ItemMagnet { none, player, thief }
 
 Vector2 _displaySizeFor(ItemType type) {
   if (type.isJewel) {
-    // Universal diamond PNG ~316×395 — keep aspect so it doesn't squash.
+    // Almaz PNG ~593×540 — keep aspect so it doesn't squash.
     final h = type == ItemType.legendary
         ? GameConfig.jewelDisplaySize * 1.12
         : GameConfig.jewelDisplaySize;
-    return Vector2(h * (316 / 395), h);
+    return Vector2(h * (593 / 540), h);
   }
   if (type.isDynamiteCart) {
     // Crop is ~320×298 — keep aspect so wheels don't squash.

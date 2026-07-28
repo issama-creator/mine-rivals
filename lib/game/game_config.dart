@@ -178,9 +178,9 @@ class GameConfig {
 
   static const double playerWidth = 66;
   static const double playerHeight = 128;
-  /// Top-down cart pusher — slightly larger so the bed reads on the path.
-  static const double playerCartWidth = 114;
-  static const double playerCartHeight = 128;
+  /// Top-down cart pusher — tight on the path (new player sheet is wide).
+  static const double playerCartWidth = 96;
+  static const double playerCartHeight = 112;
   /// Thief same pose, ~12% smaller so the hero reads as primary.
   static const double thiefWidth = 100;
   static const double thiefHeight = 112;
@@ -248,7 +248,7 @@ class GameConfig {
   static const int coinTrailFromStreak = 3;
 
   /// Falling loot sizes — jewels share one square so corridor crops look even.
-  static const double jewelDisplaySize = 48;
+  static const double jewelDisplaySize = 45.6;
   static const double lootDisplaySize = 38;
   /// One size for every bomb (square crop → square draw, no squash).
   static const double bombDisplaySize = 48;
@@ -511,8 +511,8 @@ class GameConfig {
   /// Upright skins — classic stride.
   static const int minerRunFps = 15;
   /// Cart / top-down sheets — slow deliberate push stride.
-  static const int minerCartRunFps = 8;
+  static const int minerCartRunFps = 6;
   /// Soft ceiling so late-run pace doesn't skip frames.
-  static const double minerCartAnimRateMax = 1.05;
+  static const double minerCartAnimRateMax = 1.0;
   static const int runFrames = 18;
 }

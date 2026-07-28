@@ -41,7 +41,7 @@ class ProgressStore {
   SharedPreferences? _prefs;
 
   /// Free skins — always available.
-  static const Set<String> freeSkins = {'p5'};
+  static const Set<String> freeSkins = {'player', 'p5'};
 
   /// Consecutive perfect-mission days → unlock that skin.
   static const Map<int, String> streakUnlocks = {};

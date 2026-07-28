@@ -13,7 +13,7 @@ class DiamondCollectFx extends SpriteComponent {
     this.onArrive,
   }) : super(
           position: from.clone(),
-          size: Vector2(18, 22),
+          size: Vector2(17.1, 20.9),
           anchor: Anchor.center,
           priority: 120,
         ) {
@@ -27,8 +27,8 @@ class DiamondCollectFx extends SpriteComponent {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    sprite = AssetLibrary.items[ItemType.diamond];
-    scale = Vector2.all(0.45);
+    sprite = AssetLibrary.cartGem ?? AssetLibrary.items[ItemType.diamond];
+    scale = Vector2.all(0.5);
     add(
       ScaleEffect.to(
         Vector2.all(0.85),
