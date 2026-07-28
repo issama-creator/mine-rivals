@@ -4,6 +4,9 @@ import '../systems/game_settings.dart';
 
 /// Tunable balance + world constants for Mine Rivals.
 class GameConfig {
+  /// Temp: parade skins only — no thief, no hazards (jewels still fall).
+  static const bool skinCompareMode = false;
+
   /// Theme / shaft art swaps every kilometer (endless).
   static const double corridorSegmentMeters = 1000;
 

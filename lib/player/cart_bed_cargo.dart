@@ -39,13 +39,28 @@ class CartBedCargoLayer {
   /// How far above the helmet the cart floor sits (дно вагонетки).
   static const double _playerFloorAboveHat = 0.026;
 
-  static const double _p5Cx = 0.477;
-  static const double _p5Cy = 0.385;
+  /// Cart-bed center per p5 sheet column (row 0) — follows hop so gems don't hang.
+  static const List<double> _p5BedCx = [
+    0.479,
+    0.485,
+    0.477,
+    0.486,
+    0.480,
+    0.481,
+  ];
+  static const List<double> _p5BedCy = [
+    0.385,
+    0.351,
+    0.368,
+    0.343,
+    0.364,
+    0.355,
+  ];
   static const double _vorCx = 0.472;
   static const double _vorCy = 0.405;
 
   static const double _bedWFrac = 0.28;
-  static const double _bedHFrac = 0.085;
+  static const double _bedHFrac = 0.12;
 
   /// Feet → bed for fly FX (avg floor).
   static double get bedYFracFromFeet {
@@ -54,32 +69,35 @@ class CartBedCargoLayer {
       const avgHat = 0.565;
       return 1 - (avgHat - _playerFloorAboveHat);
     }
-    return 1 - _p5Cy;
+    final avgCy =
+        _p5BedCy.reduce((a, b) => a + b) / _p5BedCy.length;
+    return 1 - avgCy;
   }
 
-  /// Tight scatter on the cart floor (small Y — stay against the back wall).
+  /// Messy dump across the whole bed — each gem claims its own patch (max 15).
+  static const int maxVisibleGems = 15;
+
+  /// Fractions of bedW/bedH; look random, stay fixed (no per-frame flicker).
   static const List<Offset> _pileSlots = [
-    Offset(0.00, 0.08),
-    Offset(-0.26, 0.02),
-    Offset(0.24, 0.12),
-    Offset(-0.10, 0.16),
-    Offset(0.12, -0.02),
-    Offset(-0.20, 0.14),
-    Offset(0.06, 0.18),
+    Offset(-0.22, 0.18),
+    Offset(0.28, -0.12),
+    Offset(0.05, 0.30),
+    Offset(-0.32, -0.22),
     Offset(0.18, 0.08),
+    Offset(-0.08, -0.30),
+    Offset(0.34, 0.22),
+    Offset(-0.30, 0.06),
+    Offset(0.12, -0.28),
+    Offset(-0.02, 0.02),
+    Offset(0.26, 0.32),
+    Offset(-0.36, 0.28),
+    Offset(0.32, -0.30),
+    Offset(-0.16, -0.06),
+    Offset(0.08, 0.20),
   ];
 
-  static int visibleGemCount(int total) {
-    if (total <= 0) return 0;
-    if (total == 1) return 1;
-    if (total <= 3) return 2;
-    if (total <= 6) return 3;
-    if (total <= 10) return 4;
-    if (total <= 16) return 5;
-    if (total <= 24) return 6;
-    if (total <= 35) return 7;
-    return 8;
-  }
+  /// 1 collected → 1 shown … up to [maxVisibleGems] in the cart bed.
+  static int visibleGemCount(int total) => total.clamp(0, maxVisibleGems);
 
   void paint(
     Canvas canvas,
@@ -101,21 +119,22 @@ class CartBedCargoLayer {
     final bedW = ps.x * _bedWFrac;
     final bedH = ps.y * _bedHFrac;
     final centerX = ps.x * cx;
-    final centerY = ps.y * cy;
+    final centerY = ps.y * cy + bedH * 0.12;
 
     canvas.save();
     canvas.translate(centerX, centerY);
     canvas.clipRect(
       Rect.fromCenter(
-        center: const Offset(0, 0.05),
+        center: Offset.zero,
         width: bedW * 1.08,
         height: bedH * 1.2,
       ),
     );
 
-    // No scale pulse — that made cargo look like it was wobbling.
     final shown = visibleGemCount(n);
-    final gemW = bedW * (0.24 - (shown - 1) * 0.009).clamp(0.16, 0.24);
+    // Small enough that neighbors don't melt into one blob.
+    final base = bedW * 0.18 < bedH * 0.9 ? bedW * 0.18 : bedH * 0.9;
+    final gemW = base * 1.05;
     final gemH = gemW * 0.88;
 
     for (var j = 0; j < shown; j++) {
@@ -141,6 +160,12 @@ class CartBedCargoLayer {
       // Floor glued just above the helmet — moves with the sprite, no slide.
       return (0.50, _playerHatTop[i] - _playerFloorAboveHat);
     }
-    return (_p5Cx, _p5Cy);
+    // Map anim index → sheet column (honours walkFrameIndices).
+    final keep = skin.walkFrameIndices;
+    final sheetCol = (keep != null && keep.isNotEmpty)
+        ? keep[animFrame % keep.length]
+        : animFrame % _p5BedCy.length;
+    final i = sheetCol.clamp(0, _p5BedCy.length - 1);
+    return (_p5BedCx[i], _p5BedCy[i]);
   }
 }

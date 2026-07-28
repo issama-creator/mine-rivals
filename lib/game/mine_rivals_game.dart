@@ -19,6 +19,7 @@ import '../items/item_pool.dart';
 import '../items/item_type.dart';
 import '../items/spawn_director.dart';
 import '../player/player_component.dart';
+import '../player/skin_parade.dart';
 import '../systems/audio_manager.dart';
 import '../systems/game_settings.dart';
 import '../systems/lead_system.dart';
@@ -92,6 +93,7 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
 
   /// Thief reached the cart — draining bank crystals over time.
   bool get isThiefAtCart =>
+      !GameConfig.skinCompareMode &&
       !finished &&
       !inChaseIntro &&
       !_checkpointOpen &&
@@ -263,9 +265,10 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   bool get inFinale => false;
 
   List<ThiefComponent> get _pack {
-    _packCache
-      ..clear()
-      ..add(thief);
+    _packCache.clear();
+    if (!GameConfig.skinCompareMode) {
+      _packCache.add(thief);
+    }
     return _packCache;
   }
 
@@ -301,9 +304,17 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     player = PlayerComponent();
     thief = ThiefComponent();
     chaseArrow = ChaseArrow();
-    await add(thief);
+    if (!GameConfig.skinCompareMode) {
+      await add(thief);
+    }
     await add(player);
-    await add(chaseArrow);
+    // Parade only useful with 2+ skins to compare.
+    if (PlayerSkins.paradeSkins.length > 1) {
+      await add(SkinParade());
+    }
+    if (!GameConfig.skinCompareMode) {
+      await add(chaseArrow);
+    }
     await add(GoldTrail());
 
     // Overtake pass removed — thief only creeps to the cart and steals.
@@ -313,7 +324,14 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     lead.leadDistance = 0.85;
     lead.visualLead = 0.85;
     _layoutActors();
-    _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
+    _pulseBanner(
+      GameConfig.skinCompareMode
+          ? 'Тест скинов · вор и ловушки выкл'
+          : 'Вор за тобой!',
+      GameConfig.skinCompareMode
+          ? const Color(0xFF66BB6A)
+          : const Color(0xFFEF5350),
+    );
     started = true;
     unawaited(_applyShopLoadout());
     // Defer corridor prefetch — right after boot it fights hot restart / GC.
@@ -385,6 +403,9 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
   }
 
   void _updateChaseArrow() {
+    if (GameConfig.skinCompareMode || !chaseArrow.isMounted) {
+      return;
+    }
     if (lead.isOvertaking) {
       chaseArrow.setActive(false);
       return;
@@ -1003,6 +1024,22 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     // Empty corridor beat — teach “challenge incoming” before bomb gates.
     if (beat.silence) return;
 
+    // Skin parade test — only loot/jewels, no thief pressure / traps.
+    if (GameConfig.skinCompareMode) {
+      if (beat.bombPattern ||
+          beat.type.isExplosive ||
+          beat.type.isLethalFloor ||
+          beat.type.isWeb) {
+        final lane = beat.lane ?? _rng.nextInt(GameConfig.bombLaneCount);
+        _spawnLiveItem(
+          type: ItemType.diamond,
+          position: Vector2(_laneX(lane), -40),
+          fallSpeed: background.speed,
+        );
+        return;
+      }
+    }
+
     if (beat.bombPattern || beat.type.isExplosive) {
       final bombLive = liveItems.any((e) => e.type.isExplosive);
       if (bombLive || _bombCooldown > 0) {
@@ -1324,10 +1361,13 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     _breakJewelCombo();
     unawaited(audio.play('steal'));
     HapticFeedback.selectionClick();
-    thief.pulseBedCargo();
+    if (thief.isMounted) {
+      thief.pulseBedCargo();
+    }
     _pulseBanner('Вор рядом · +1', const Color(0xFFEF5350));
     bannerTimer = 1.0;
     // Score ping on the thief — he just benefits by being close.
+    if (!thief.isMounted) return;
     final t = thief;
     add(
       FloatingText(
@@ -2424,7 +2464,14 @@ class MineRivalsGame extends FlameGame with DragCallbacks, TapCallbacks {
     lead.leadDistance = 0.85;
     lead.visualLead = 0.85;
     _layoutActors();
-    _pulseBanner('Вор за тобой!', const Color(0xFFEF5350));
+    _pulseBanner(
+      GameConfig.skinCompareMode
+          ? 'Тест скинов · вор и ловушки выкл'
+          : 'Вор за тобой!',
+      GameConfig.skinCompareMode
+          ? const Color(0xFF66BB6A)
+          : const Color(0xFFEF5350),
+    );
     resumeEngine();
   }
 

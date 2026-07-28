@@ -11,7 +11,7 @@ class GameSettings {
   double controlSensitivity = 0.28;
 
   /// Selected miner skin id — see [PlayerSkins].
-  String selectedSkinId = 'player';
+  String selectedSkinId = 'p5';
 
   /// Series rivalry — mode picks round count + thief pressure.
   RunMode runMode = RunMode.standard;

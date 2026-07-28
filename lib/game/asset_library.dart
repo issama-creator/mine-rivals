@@ -48,7 +48,7 @@ class AssetLibrary {
 
   /// Per-corridor jewel sets — unused; one global diamond for all shafts.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 81;
+  static const int _assetVersion = 84;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
@@ -393,6 +393,7 @@ class AssetLibrary {
                     ? GameConfig.minerCartRunFps
                     : GameConfig.minerRunFps),
             walkRows: skin.walkRows,
+            keepIndices: skin.walkFrameIndices,
           );
         } else {
           skinRuns[skin.id] = await _sliceRunAnimationStabilized(
@@ -411,12 +412,14 @@ class AssetLibrary {
 
   /// Even grid slice. [walkRows] limits to the first N rows (top-down walk
   /// cycle) so we don't animate every facing / outlier cell and hop.
+  /// [keepIndices] picks a subset (row-major within the walk rows).
   static SpriteAnimation _sliceSimpleGrid(
     ui.Image image, {
     required int columns,
     required int rows,
     required double stepTime,
     int? walkRows,
+    List<int>? keepIndices,
   }) {
     final frameW = image.width / columns;
     final frameH = image.height / rows;
@@ -433,7 +436,18 @@ class AssetLibrary {
         );
       }
     }
-    return SpriteAnimation.spriteList(frames, stepTime: stepTime, loop: true);
+    var out = frames;
+    var outStep = stepTime;
+    if (keepIndices != null && keepIndices.isNotEmpty) {
+      out = [
+        for (final i in keepIndices)
+          if (i >= 0 && i < frames.length) frames[i],
+      ];
+      if (out.isEmpty) out = frames;
+      // Keep full-cycle duration so fewer frames don't look like a sprint.
+      outStep = stepTime * (frames.length / out.length);
+    }
+    return SpriteAnimation.spriteList(out, stepTime: outStep, loop: true);
   }
 
   /// Keep jewel sprites pinned to the universal diamond (all corridors).
