@@ -184,9 +184,9 @@ class GameConfig {
   /// Top-down cart pusher — tight on the path (new player sheet is wide).
   static const double playerCartWidth = 96;
   static const double playerCartHeight = 112;
-  /// Thief same pose, ~12% smaller so the hero reads as primary.
-  static const double thiefWidth = 100;
-  static const double thiefHeight = 112;
+  /// Thief ~12% smaller so the yellow-hat hero reads as primary.
+  static const double thiefWidth = 84;
+  static const double thiefHeight = 98;
   /// Top-down vor sheet — clean 6×4 (24 frames).
   static const int thiefSheetColumns = 6;
   static const int thiefSheetRows = 4;
@@ -504,11 +504,11 @@ class GameConfig {
   /// Mild shrink when thief is deep ahead up the corridor.
   static const double thiefAheadScale = 0.72;
 
-  static const double thiefLaneOffsetX = 44;
+  static const double thiefLaneOffsetX = 56;
   /// Beside the miner when draining the cart bank.
-  static const double thiefCartPressOffsetX = 54;
-  static const double thiefPassExtraX = 58;
-  static const double thiefMinClearanceX = 56;
+  static const double thiefCartPressOffsetX = 70;
+  static const double thiefPassExtraX = 66;
+  static const double thiefMinClearanceX = 68;
 
   static const int runFps = 9;
   /// Upright skins — classic stride.

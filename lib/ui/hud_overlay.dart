@@ -258,49 +258,42 @@ class _HudOverlayState extends State<HudOverlay> {
                   child: IgnorePointer(
                     child: Column(
                       children: [
-                        // Hero distance — the Subway score read.
-                        Text(
-                          runLabel,
+                        // Distance + thief gap on one compact hero line.
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: runLabel,
+                                style: TextStyle(
+                                  color: const Color(0xFFFFF8E1),
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1,
+                                  letterSpacing: -0.5,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black.withValues(alpha: 0.75),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              TextSpan(
+                                text: ' м',
+                                style: TextStyle(
+                                  color: const Color(0xFFFFE082)
+                                      .withValues(alpha: 0.85),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1,
+                                ),
+                              ),
+                            ],
+                          ),
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: const Color(0xFFFFF8E1),
-                            fontSize: 34,
-                            fontWeight: FontWeight.w900,
-                            height: 1,
-                            letterSpacing: -0.5,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withValues(alpha: 0.75),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                              Shadow(
-                                color: const Color(0xFFFFB300)
-                                    .withValues(alpha: 0.35),
-                                blurRadius: 12,
-                              ),
-                            ],
-                          ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'м',
-                          style: TextStyle(
-                            color: const Color(0xFFFFE082)
-                                .withValues(alpha: 0.85),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 2,
-                            height: 1,
-                            shadows: const [
-                              Shadow(
-                                color: Colors.black54,
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 3),
                         _ShaftDots(
                           current: shaft,
                           total: shafts,
@@ -308,23 +301,22 @@ class _HudOverlayState extends State<HudOverlay> {
                                   GameConfig.corridorSegmentMeters) /
                               GameConfig.corridorSegmentMeters,
                         ),
-                        const SizedBox(height: 4),
-                        AnimatedDefaultTextStyle(
-                          duration: const Duration(milliseconds: 180),
+                        const SizedBox(height: 3),
+                        Text(
+                          game.isThiefStealingCart
+                              ? 'вор рядом · р.${game.seriesRound}/${game.seriesRounds}'
+                              : 'вор ${game.thiefBehindMeters}м · р.${game.seriesRound}/${game.seriesRounds}',
+                          textAlign: TextAlign.center,
                           style: TextStyle(
                             color: youLead
                                 ? const Color(0xFF81C784)
                                 : const Color(0xFFFF8A65),
-                            fontSize: youLead ? 11 : 14,
-                            fontWeight: FontWeight.w900,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            height: 1.1,
                             shadows: const [
                               Shadow(color: Colors.black54, blurRadius: 3),
                             ],
-                          ),
-                          child: Text(
-                            game.isThiefStealingCart
-                                ? 'Вор рядом · +1 · р.${game.seriesRound}/${game.seriesRounds}'
-                                : 'Вор ${game.thiefBehindMeters} м сзади · р.${game.seriesRound}/${game.seriesRounds}',
                           ),
                         ),
                       ],
@@ -431,11 +423,25 @@ class _HudOverlayState extends State<HudOverlay> {
                     ],
                   ),
                   const Spacer(),
-                  _CrystalScore(
-                    asset: _gemThief,
-                    value: thiefRare,
-                    accent: const Color(0xFFEF5350),
-                    label: 'вор',
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _CrystalScore(
+                        asset: _gemThief,
+                        value: thiefRare,
+                        accent: const Color(0xFFEF5350),
+                        label: 'вор',
+                      ),
+                      // Short edge threat — not a center scream.
+                      if (game.isThiefStealingCart) ...[
+                        const SizedBox(height: 4),
+                        _EdgeThreat(label: 'у тележки', hot: true),
+                      ] else if (game.isThiefBreathing) ...[
+                        const SizedBox(height: 4),
+                        _EdgeThreat(label: 'вор!', hot: false),
+                      ],
+                    ],
                   ),
                 ],
               ),
@@ -445,19 +451,11 @@ class _HudOverlayState extends State<HudOverlay> {
               IgnorePointer(
                 child: _toast('Рывок!', const Color(0xFFCE93D8)),
               ),
-            ] else if (game.isThiefStealingCart) ...[
-              const SizedBox(height: 6),
-              IgnorePointer(
-                child: _toast(
-                  'Вор рядом · копит +1',
-                  const Color(0xFFEF5350),
-                ),
-              ),
             ] else if (game.isIdealLine) ...[
               const SizedBox(height: 6),
               IgnorePointer(
                 child: _toast(
-                  'Идеальная линия · вор отстаёт',
+                  'Идеальная линия',
                   const Color(0xFF66BB6A),
                 ),
               ),
@@ -473,14 +471,6 @@ class _HudOverlayState extends State<HudOverlay> {
               const SizedBox(height: 6),
               IgnorePointer(
                 child: _toast('Вор рванул!', const Color(0xFFEF5350)),
-              ),
-            ] else if (game.isThiefBreathing) ...[
-              const SizedBox(height: 6),
-              IgnorePointer(
-                child: _toast(
-                  'Вор у тележки!',
-                  const Color(0xFFFF8A65),
-                ),
               ),
             ] else if (game.bannerText != null) ...[
               const SizedBox(height: 6),
@@ -607,7 +597,7 @@ class _ShaftDots extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         for (var i = 1; i <= total; i++) ...[
-          if (i > 1) const SizedBox(width: 5),
+          if (i > 1) const SizedBox(width: 4),
           _pip(i),
         ],
       ],
@@ -618,7 +608,7 @@ class _ShaftDots extends StatelessWidget {
     final done = i < current;
     final active = i == current;
     final t = progressInShaft.clamp(0.0, 1.0);
-    final size = active ? 9.0 : 6.0;
+    final size = active ? 7.0 : 5.0;
     Color color;
     if (done) {
       color = const Color(0xFFFFB300);
@@ -641,7 +631,7 @@ class _ShaftDots extends StatelessWidget {
             ? [
                 BoxShadow(
                   color: const Color(0xFFFFB300).withValues(alpha: 0.45),
-                  blurRadius: 6,
+                  blurRadius: 5,
                 ),
               ]
             : null,
@@ -867,6 +857,32 @@ class _JewelComboHint extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Compact edge threat under the thief crystal chip.
+class _EdgeThreat extends StatelessWidget {
+  const _EdgeThreat({required this.label, required this.hot});
+
+  final String label;
+  final bool hot;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = hot ? const Color(0xFFEF5350) : const Color(0xFFFF8A65);
+    return Text(
+      label.toUpperCase(),
+      style: TextStyle(
+        color: color,
+        fontSize: hot ? 11 : 10,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 0.5,
+        height: 1,
+        shadows: const [
+          Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(0, 1)),
+        ],
       ),
     );
   }

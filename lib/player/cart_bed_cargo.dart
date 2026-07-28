@@ -56,11 +56,11 @@ class CartBedCargoLayer {
     0.364,
     0.355,
   ];
-  static const double _vorCx = 0.472;
-  static const double _vorCy = 0.405;
+  static const double _vorCx = 0.470;
+  static const double _vorCy = 0.430;
 
-  static const double _bedWFrac = 0.28;
-  static const double _bedHFrac = 0.12;
+  static const double _bedWFrac = 0.32;
+  static const double _bedHFrac = 0.14;
 
   /// Feet → bed for fly FX (avg floor).
   static double get bedYFracFromFeet {
@@ -132,10 +132,24 @@ class CartBedCargoLayer {
     );
 
     final shown = visibleGemCount(n);
-    // Small enough that neighbors don't melt into one blob.
-    final base = bedW * 0.18 < bedH * 0.9 ? bedW * 0.18 : bedH * 0.9;
-    final gemW = base * 1.05;
+    // Readable pile — bigger gems so cargo reads at a glance.
+    final base = bedW * 0.24 < bedH * 1.05 ? bedW * 0.24 : bedH * 1.05;
+    final gemW = base * (forThief ? 1.08 : 1.05);
     final gemH = gemW * 0.88;
+
+    // Soft glow under the dump so empty vs loaded carts differ instantly.
+    final glow = Paint()
+      ..color = (forThief ? const Color(0xFFEF5350) : const Color(0xFF4FC3F7))
+          .withValues(alpha: 0.22 + 0.02 * shown.clamp(0, 8))
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset.zero,
+        width: bedW * 0.85,
+        height: bedH * 0.95,
+      ),
+      glow,
+    );
 
     for (var j = 0; j < shown; j++) {
       final pile = _pileSlots[j];

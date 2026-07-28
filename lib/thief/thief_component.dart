@@ -16,6 +16,7 @@ class ThiefComponent extends SpriteAnimationComponent {
           size: Vector2(GameConfig.thiefWidth, GameConfig.thiefHeight),
           anchor: Anchor.bottomCenter,
           priority: 10,
+          paint: _silhouettePaint,
         );
 
   double _displayScale = 1;
@@ -28,10 +29,23 @@ class ThiefComponent extends SpriteAnimationComponent {
 
   double passSide = 1;
 
+  /// Cooler / slightly darker than the miner so silhouettes don't melt together.
+  static final Paint _silhouettePaint = Paint()
+    ..colorFilter = const ColorFilter.matrix(<double>[
+      0.82, 0.05, 0.05, 0, 0,
+      0.04, 0.80, 0.06, 0, 0,
+      0.06, 0.08, 1.12, 0, 10,
+      0, 0, 0, 1, 0,
+    ]);
+
   static final Paint _shadowOuter =
       Paint()..color = Colors.black.withValues(alpha: 0.38);
   static final Paint _shadowInner =
       Paint()..color = Colors.black.withValues(alpha: 0.20);
+
+  static final Paint _rimPaint = Paint()
+    ..color = const Color(0xFF5C6BC0).withValues(alpha: 0.35)
+    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
 
   void setRunAnimRate(double rate) {
     _animRateTarget =
@@ -41,6 +55,15 @@ class ThiefComponent extends SpriteAnimationComponent {
   @override
   void render(Canvas canvas) {
     _paintFeetShadow(canvas);
+    // Soft cool rim — separates dark gear from brown path / miner.
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(size.x * 0.5, size.y * 0.52),
+        width: size.x * 0.72,
+        height: size.y * 0.78,
+      ),
+      _rimPaint,
+    );
     super.render(canvas);
     final bed = _bedCargo;
     final game = findGame();
