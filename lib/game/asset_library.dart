@@ -48,7 +48,7 @@ class AssetLibrary {
 
   /// Per-corridor jewel sets — unused; one global diamond for all shafts.
   static final List<List<Sprite>> corridorJewels = [];
-  static const int _assetVersion = 84;
+  static const int _assetVersion = 89;
   static int _loadedVersion = 0;
 
   static Future<void>? _loadFuture;
@@ -359,9 +359,8 @@ class AssetLibrary {
     try {
       final almaz = await _loadImage('assets/images/items/almaz.png');
       sprite = Sprite(almaz);
-    } catch (_) {
-      final img = await _loadImage('assets/images/items/diamond.png');
-      sprite = Sprite(img);
+    } catch (e) {
+      throw StateError('Missing assets/images/items/almaz.png ($e)');
     }
     items[ItemType.diamond] = sprite;
     items[ItemType.ruby] = sprite;

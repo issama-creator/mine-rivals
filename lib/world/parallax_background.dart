@@ -30,10 +30,8 @@ class ParallaxBackground extends PositionComponent {
   final Paint _fadePaint = Paint()
     ..filterQuality = FilterQuality.none
     ..isAntiAlias = false;
-  final Paint _clearPaint = Paint()..color = const Color(0xFF0E0A06);
   final Paint _dimPaint = Paint();
-  final Vector2 _tilePos = Vector2.zero();
-  final Vector2 _tileSize = Vector2.zero();
+  final Paint _clearPaint = Paint()..color = const Color(0xFF0E0A06);
 
   bool get isEnteringCorridor => _enterT < 1;
 
@@ -127,13 +125,19 @@ class ParallaxBackground extends PositionComponent {
     final srcH = sprite.srcSize.y;
     if (srcW <= 0 || srcH <= 0) return;
 
+    // Crop sides → zoom center → stone path reads ~[pathWidthScale] wider.
+    final showFrac = (1.0 / GameConfig.pathWidthScale).clamp(0.75, 1.0);
+    final cropW = srcW * showFrac;
+    final cropX = sprite.srcPosition.x + (srcW - cropW) * 0.5;
+    final cropY = sprite.srcPosition.y;
+    final srcRect = Rect.fromLTWH(cropX, cropY, cropW, srcH);
+
     // Integer tile size so joins land on pixel boundaries.
     final tileW = size.x.roundToDouble();
-    final tileH = math.max(8, (srcH * (tileW / srcW)).round()).toDouble();
-    // Larger overlap + soft BG edge bake hide the tile loop join.
+    final tileH =
+        math.max(8, (srcH * (tileW / cropW)).round()).toDouble();
     const seamOverlap = 14.0;
     final period = math.max(8.0, tileH - seamOverlap);
-    // Pixel-snap scroll so the join doesn't smear between rows.
     final offset = (scroll % period).floorToDouble();
 
     final fading = opacity < 0.999;
@@ -142,17 +146,12 @@ class ParallaxBackground extends PositionComponent {
       paint.color = Color.fromRGBO(255, 255, 255, opacity);
     }
 
-    _tileSize.setValues(tileW, tileH);
+    final image = sprite.image;
     var drawn = 0;
     for (var y = -tileH + offset; y < size.y + tileH && drawn < 8; y += period) {
       drawn++;
-      _tilePos.setValues(0, y);
-      sprite.render(
-        canvas,
-        position: _tilePos,
-        size: _tileSize,
-        overridePaint: paint,
-      );
+      final dst = Rect.fromLTWH(0, y, tileW, tileH);
+      canvas.drawImageRect(image, srcRect, dst, paint);
     }
   }
 

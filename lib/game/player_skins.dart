@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'game_config.dart';
+
 /// Catalog of playable miner skins.
 class PlayerSkin {
   const PlayerSkin({
@@ -14,6 +16,8 @@ class PlayerSkin {
     this.walkFrameIndices,
     this.cartStyle = false,
     this.topDown = false,
+    this.displayWidth,
+    this.displayHeight,
   });
 
   final String id;
@@ -30,29 +34,42 @@ class PlayerSkin {
   final bool cartStyle;
   final bool topDown;
 
+  /// On-screen size override (keeps sheet aspect — avoids stretch-fat sprites).
+  final double? displayWidth;
+  final double? displayHeight;
+
   int get frameCount =>
       walkFrameIndices?.length ?? columns * (walkRows ?? rows);
+
+  double get width =>
+      displayWidth ??
+      (cartStyle ? GameConfig.playerCartWidth : GameConfig.playerWidth);
+
+  double get height =>
+      displayHeight ??
+      (cartStyle ? GameConfig.playerCartHeight : GameConfig.playerHeight);
 }
 
 class PlayerSkins {
   PlayerSkins._();
 
-  static const String defaultId = 'p5';
+  static const String defaultId = 'fav';
 
   static const List<PlayerSkin> all = [
     PlayerSkin(
-      id: 'p5',
+      id: 'fav',
       nameRu: 'Шахтёр',
-      sheetAsset: 'assets/images/skins/p5.png',
-      previewAsset: 'assets/images/skins/preview/p5.png',
-      accent: Color(0xFFFF8F00),
+      sheetAsset: 'assets/images/skins/fav.png',
+      previewAsset: 'assets/images/skins/preview/fav.png',
+      accent: Color(0xFFFFCA28),
       columns: 6,
-      rows: 4,
+      rows: 1,
       walkRows: 1,
-      // Drop hop-on-one-leg poses (#2,#4,#6) — keep planted / mild stride.
-      walkFrameIndices: [0, 2, 4],
       cartStyle: true,
       topDown: true,
+      // Sheet ~132×339 — keep aspect; −30% then −3% more.
+      displayWidth: 40,
+      displayHeight: 101,
     ),
   ];
 

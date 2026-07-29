@@ -466,16 +466,19 @@ class GameConfig {
   static const double chaseIntroSec = 2.35;
 
   /// Walkable stone path inset from each screen edge (player steering).
-  /// Path art widened ~10% → playable band ~55.6% (inset 0.222).
-  static const double pathInsetFrac = 0.222;
+  /// Path art + [pathWidthScale] 1.08 → playable band ~60% (inset 0.200).
+  static const double pathInsetFrac = 0.200;
   /// Extra padding inside the path so sprites don't kiss the rock edge.
   static const double pathPadPx = 6;
 
+  /// Visual path widen — crops corridor sides slightly (1.0 = art as authored).
+  static const double pathWidthScale = 1.08;
+
   /// Normal loot/bombs: center band scaled with the wider path.
-  static const double spawnInsetFrac = 0.235;
+  static const double spawnInsetFrac = 0.211;
   /// Rare “in the bushes” spawn near the wall ice (still on path edge).
   static const double bushSpawnChance = 0.14;
-  static const double bushInsetFrac = 0.17;
+  static const double bushInsetFrac = 0.153;
 
   static const double thiefMagnetRadius = 118;
   static const double thiefMagnetPullSpeed = 240;
@@ -514,7 +517,7 @@ class GameConfig {
   /// Upright skins — classic stride.
   static const int minerRunFps = 15;
   /// Cart / top-down sheets — slow deliberate push stride.
-  static const int minerCartRunFps = 6;
+  static const int minerCartRunFps = 4;
   /// Soft ceiling so late-run pace doesn't skip frames.
   static const double minerCartAnimRateMax = 1.0;
   static const int runFrames = 18;

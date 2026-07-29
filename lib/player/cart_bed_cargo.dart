@@ -7,96 +7,82 @@ import '../game/player_skins.dart';
 import '../items/item_type.dart';
 import '../systems/game_settings.dart';
 
-/// Crystals glued to the cart floor — track helmet so they don't slide on run.
+/// Crystals glued to the cart floor — locked to bed, no run wobble.
 class CartBedCargoLayer {
   CartBedCargoLayer({required this.forThief});
 
   final bool forThief;
-  double pulse = 0;
+  double pulse = 0; // kept for call sites; paint ignores it (no bounce).
 
-  /// Helmet top Y per walk frame (player.png 6×3) — cargo sits just above it.
-  static const List<double> _playerHatTop = [
-    0.557,
-    0.548,
-    0.543,
-    0.566,
-    0.551,
-    0.575,
-    0.566,
-    0.554,
-    0.584,
-    0.572,
-    0.560,
-    0.572,
-    0.578,
-    0.575,
-    0.578,
-    0.563,
-    0.563,
-    0.578,
-  ];
-
-  /// How far above the helmet the cart floor sits (дно вагонетки).
-  static const double _playerFloorAboveHat = 0.026;
-
-  /// Cart-bed center per p5 sheet column (row 0) — follows hop so gems don't hang.
-  static const List<double> _p5BedCx = [
-    0.479,
-    0.485,
+  /// Vor walk-row bed centers (sheet cols 0–5).
+  static const List<double> _vorBedCx = [
+    0.470,
+    0.472,
+    0.471,
+    0.473,
     0.477,
-    0.486,
-    0.480,
-    0.481,
+    0.476,
   ];
-  static const List<double> _p5BedCy = [
-    0.385,
-    0.351,
-    0.368,
-    0.343,
-    0.364,
-    0.355,
+  static const List<double> _vorBedCy = [
+    0.420,
+    0.419,
+    0.425,
+    0.421,
+    0.428,
+    0.426,
   ];
-  static const double _vorCx = 0.470;
-  static const double _vorCy = 0.430;
 
-  static const double _bedWFrac = 0.32;
-  static const double _bedHFrac = 0.14;
+  /// Fav walk-row bed centers (sheet cols 0–5).
+  static const List<double> _favBedCx = [
+    0.501,
+    0.515,
+    0.507,
+    0.504,
+    0.510,
+    0.507,
+  ];
+  static const List<double> _favBedCy = [
+    0.226,
+    0.230,
+    0.231,
+    0.234,
+    0.229,
+    0.232,
+  ];
+
+  static const double _bedWFrac = 0.34;
+  static const double _bedHFrac = 0.13;
+  static const double _thiefBedWFrac = 0.26;
+  static const double _thiefBedHFrac = 0.095;
 
   /// Feet → bed for fly FX (avg floor).
   static double get bedYFracFromFeet {
-    final skin = PlayerSkins.byId(GameSettings.instance.selectedSkinId);
-    if (skin.id == 'player') {
-      const avgHat = 0.565;
-      return 1 - (avgHat - _playerFloorAboveHat);
-    }
-    final avgCy =
-        _p5BedCy.reduce((a, b) => a + b) / _p5BedCy.length;
-    return 1 - avgCy;
+    final avg =
+        _favBedCy.reduce((a, b) => a + b) / _favBedCy.length;
+    return 1 - avg;
   }
 
-  /// Messy dump across the whole bed — each gem claims its own patch (max 15).
   static const int maxVisibleGems = 15;
 
-  /// Fractions of bedW/bedH; look random, stay fixed (no per-frame flicker).
+  /// Messy dump across the bed — looks random, stays fixed (no flicker).
   static const List<Offset> _pileSlots = [
-    Offset(-0.22, 0.18),
-    Offset(0.28, -0.12),
-    Offset(0.05, 0.30),
-    Offset(-0.32, -0.22),
-    Offset(0.18, 0.08),
-    Offset(-0.08, -0.30),
-    Offset(0.34, 0.22),
-    Offset(-0.30, 0.06),
-    Offset(0.12, -0.28),
-    Offset(-0.02, 0.02),
-    Offset(0.26, 0.32),
-    Offset(-0.36, 0.28),
-    Offset(0.32, -0.30),
-    Offset(-0.16, -0.06),
-    Offset(0.08, 0.20),
+    Offset(-0.28, 0.22),
+    Offset(0.32, -0.18),
+    Offset(0.06, 0.34),
+    Offset(-0.34, -0.26),
+    Offset(0.22, 0.10),
+    Offset(-0.08, -0.34),
+    Offset(0.36, 0.26),
+    Offset(-0.30, 0.04),
+    Offset(0.14, -0.30),
+    Offset(-0.02, 0.00),
+    Offset(0.28, 0.36),
+    Offset(-0.36, 0.30),
+    Offset(0.34, -0.32),
+    Offset(-0.18, -0.08),
+    Offset(0.10, 0.18),
   ];
 
-  /// 1 collected → 1 shown … up to [maxVisibleGems] in the cart bed.
   static int visibleGemCount(int total) => total.clamp(0, maxVisibleGems);
 
   void paint(
@@ -116,48 +102,35 @@ class CartBedCargoLayer {
     if (ps.x <= 0 || ps.y <= 0) return;
 
     final (cx, cy) = _bedCenter(animFrame);
-    final bedW = ps.x * _bedWFrac;
-    final bedH = ps.y * _bedHFrac;
+    final bedW = ps.x * (forThief ? _thiefBedWFrac : _bedWFrac);
+    final bedH = ps.y * (forThief ? _thiefBedHFrac : _bedHFrac);
     final centerX = ps.x * cx;
-    final centerY = ps.y * cy + bedH * 0.12;
+    final centerY = ps.y * cy + bedH * (forThief ? 0.22 : 0.08);
 
     canvas.save();
     canvas.translate(centerX, centerY);
     canvas.clipRect(
       Rect.fromCenter(
         center: Offset.zero,
-        width: bedW * 1.08,
-        height: bedH * 1.2,
+        width: bedW * 1.05,
+        height: bedH * 1.12,
       ),
     );
 
     final shown = visibleGemCount(n);
-    // Readable pile — bigger gems so cargo reads at a glance.
-    final base = bedW * 0.24 < bedH * 1.05 ? bedW * 0.24 : bedH * 1.05;
-    final gemW = base * (forThief ? 1.08 : 1.05);
+    final base = bedW * 0.24 < bedH * 1.0 ? bedW * 0.24 : bedH * 1.0;
+    final gemW = base * (forThief ? 0.85 : 1.08);
     final gemH = gemW * 0.88;
-
-    // Soft glow under the dump so empty vs loaded carts differ instantly.
-    final glow = Paint()
-      ..color = (forThief ? const Color(0xFFEF5350) : const Color(0xFF4FC3F7))
-          .withValues(alpha: 0.22 + 0.02 * shown.clamp(0, 8))
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset.zero,
-        width: bedW * 0.85,
-        height: bedH * 0.95,
-      ),
-      glow,
-    );
+    // Full bed scatter for player; thief a bit tighter so gems stay in rim.
+    final scatter = forThief ? 0.78 : 0.95;
 
     for (var j = 0; j < shown; j++) {
       final pile = _pileSlots[j];
       gem.render(
         canvas,
         position: Vector2(
-          pile.dx * bedW - gemW * 0.5,
-          pile.dy * bedH - gemH * 0.5,
+          pile.dx * bedW * scatter - gemW * 0.5,
+          pile.dy * bedH * scatter - gemH * 0.5,
         ),
         size: Vector2(gemW, gemH),
       );
@@ -167,19 +140,19 @@ class CartBedCargoLayer {
   }
 
   (double, double) _bedCenter(int animFrame) {
-    if (forThief) return (_vorCx, _vorCy);
-    final skin = PlayerSkins.byId(GameSettings.instance.selectedSkinId);
-    if (skin.id == 'player') {
-      final i = animFrame % _playerHatTop.length;
-      // Floor glued just above the helmet — moves with the sprite, no slide.
-      return (0.50, _playerHatTop[i] - _playerFloorAboveHat);
+    if (forThief) {
+      final i = animFrame % _vorBedCy.length;
+      return (_vorBedCx[i], _vorBedCy[i]);
     }
-    // Map anim index → sheet column (honours walkFrameIndices).
-    final keep = skin.walkFrameIndices;
-    final sheetCol = (keep != null && keep.isNotEmpty)
-        ? keep[animFrame % keep.length]
-        : animFrame % _p5BedCy.length;
-    final i = sheetCol.clamp(0, _p5BedCy.length - 1);
-    return (_p5BedCx[i], _p5BedCy[i]);
+    final skin = PlayerSkins.byId(GameSettings.instance.selectedSkinId);
+    if (skin.id == 'fav') {
+      final keep = skin.walkFrameIndices;
+      final sheetCol = (keep != null && keep.isNotEmpty)
+          ? keep[animFrame % keep.length]
+          : animFrame % _favBedCy.length;
+      final i = sheetCol.clamp(0, _favBedCy.length - 1);
+      return (_favBedCx[i], _favBedCy[i]);
+    }
+    return (_favBedCx[0], _favBedCy[0]);
   }
 }

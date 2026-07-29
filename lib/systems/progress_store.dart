@@ -41,7 +41,7 @@ class ProgressStore {
   SharedPreferences? _prefs;
 
   /// Free skins — always available.
-  static const Set<String> freeSkins = {'p5'};
+  static const Set<String> freeSkins = {'fav'};
 
   /// Consecutive perfect-mission days → unlock that skin.
   static const Map<int, String> streakUnlocks = {};
@@ -121,7 +121,10 @@ class ProgressStore {
     missionStreak = p.getInt(_kStreak) ?? 0;
 
     var skin = p.getString(_kSkin) ?? PlayerSkins.defaultId;
-    if (!unlockedSkins.contains(skin)) skin = PlayerSkins.defaultId;
+    if (!unlockedSkins.contains(skin) ||
+        !PlayerSkins.all.any((s) => s.id == skin)) {
+      skin = PlayerSkins.defaultId;
+    }
     GameSettings.instance.selectedSkinId = skin;
 
     dailyDayKey = todayKey();

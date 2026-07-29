@@ -2,7 +2,6 @@ import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
 import '../game/asset_library.dart';
-import '../game/game_config.dart';
 import '../game/mine_rivals_game.dart';
 import '../game/player_skins.dart';
 import '../systems/game_settings.dart';
@@ -32,8 +31,6 @@ class SkinParade extends Component with HasGameReference<MineRivalsGame> {
     if (!isMounted || _runners.isEmpty) return;
     final player = game.player;
     final selected = GameSettings.instance.selectedSkinId;
-    final scale = player.size.y / GameConfig.playerCartHeight;
-
     _playerLabel.follow(player, PlayerSkins.byId(selected));
 
     final others = _runners.where((r) => r.skin.id != selected).toList();
@@ -47,10 +44,13 @@ class SkinParade extends Component with HasGameReference<MineRivalsGame> {
     final step = n <= 1 ? 0.0 : laneSpread / (n - 1);
     final left = player.position.x - laneSpread * 0.5;
 
+    // Match parade height to the live player so aspect skins don't look huge.
+    final paradeH = player.size.y * 0.82;
+
     for (var i = 0; i < n; i++) {
       final r = others[i];
       r.position.setValues(left + step * i, player.position.y);
-      r.applyDepthScale(scale);
+      r.applyParadeSize(paradeH);
     }
   }
 }
@@ -101,10 +101,7 @@ class _ParadeRunner extends SpriteAnimationComponent {
     required SpriteAnimation animation,
   }) : super(
           animation: animation,
-          size: Vector2(
-            GameConfig.playerCartWidth * 0.82,
-            GameConfig.playerCartHeight * 0.82,
-          ),
+          size: Vector2(skin.width * 0.82, skin.height * 0.82),
           anchor: Anchor.bottomCenter,
           priority: 18,
         ) {
@@ -113,17 +110,14 @@ class _ParadeRunner extends SpriteAnimationComponent {
 
   final PlayerSkin skin;
   bool hidden = false;
-  double _displayScale = 0.82;
 
   static final Paint _labelBg = Paint()..color = const Color(0xCC000000);
   static final TextPainter _tp = TextPainter(textDirection: TextDirection.ltr);
 
-  void applyDepthScale(double playerScale) {
-    _displayScale = (0.78 * playerScale).clamp(0.55, 1.05);
-    size.setValues(
-      GameConfig.playerCartWidth * _displayScale,
-      GameConfig.playerCartHeight * _displayScale,
-    );
+  void applyParadeSize(double targetHeight) {
+    final aspect = skin.width / skin.height;
+    final h = targetHeight.clamp(48.0, 140.0);
+    size.setValues(h * aspect, h);
   }
 
   @override

@@ -36,20 +36,19 @@ class PlayerComponent extends SpriteAnimationComponent {
   static final Paint _shadowInner =
       Paint()..color = Colors.black.withValues(alpha: 0.20);
 
-  bool get _cartStyle =>
-      PlayerSkins.byId(GameSettings.instance.selectedSkinId).cartStyle;
+  PlayerSkin get _skin =>
+      PlayerSkins.byId(GameSettings.instance.selectedSkinId);
 
-  bool get _topDown =>
-      PlayerSkins.byId(GameSettings.instance.selectedSkinId).topDown;
+  bool get _cartStyle => _skin.cartStyle;
+
+  bool get _topDown => _skin.topDown;
 
   /// Public for camera plant (top-down locks Y shake/dip).
   bool get topDown => _topDown;
 
-  double get baseWidth =>
-      _cartStyle ? GameConfig.playerCartWidth : GameConfig.playerWidth;
+  double get baseWidth => _skin.width;
 
-  double get baseHeight =>
-      _cartStyle ? GameConfig.playerCartHeight : GameConfig.playerHeight;
+  double get baseHeight => _skin.height;
 
   void refreshBasketCenter() {
     final yFrac =
